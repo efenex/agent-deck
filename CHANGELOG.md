@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Customizable terminal title with group/tree (`[display] title_format`)**. A new `[display] title_format` config option lets you template the outer terminal window/tab title with `{group}`, `{project}`, and `{name}` placeholders — e.g. `title_format = "{group}/{name}"` renders the full agent-deck group/tree path in the title instead of just `[<project>]`. The group path is exposed to tmux as a new `@agentdeck_group_path` user option and re-rendered live on rename and move-to-group. When unset, the historical `[<project>] <name>` format (and the `include_cwd_prefix` toggle) is preserved.
+
 ## [1.15.0] - 2026-08-23
 
 Fail-closed inbox delivery, safer session navigation, and CLI parity across ten commits merged after v1.14.0.
