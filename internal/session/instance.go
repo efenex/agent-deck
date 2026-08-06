@@ -2281,6 +2281,16 @@ func (i *Instance) getCodexHomeDir() string {
 	return i.codexHomeForCommand(i.resolveCodexCommand(i.Command))
 }
 
+// ResolvedCodexHome exposes the local rollout root for structured consumers.
+// Remote SSH sessions intentionally return empty: their path is meaningful on
+// the remote host and must not be mistaken for a readable local directory.
+func (i *Instance) ResolvedCodexHome() string {
+	if i == nil || !IsCodexCompatible(i.Tool) || strings.TrimSpace(i.SSHHost) != "" {
+		return ""
+	}
+	return i.getCodexHomeDir()
+}
+
 // Codex stores sessions in ~/.codex/sessions/YYYY/MM/DD/*.jsonl
 // Resume: codex resume <session-id> or codex resume --last
 // Also sources .env files from [shell].env_files
@@ -7148,6 +7158,15 @@ func (i *Instance) spawnFailurePreview() string {
 		return ""
 	}
 	return rec.FormatForDisplay()
+}
+
+// PreviewPrimaryFull returns the managed agent window's scrollback rather than
+// whichever auxiliary tmux window the operator most recently focused.
+func (i *Instance) PreviewPrimaryFull() (string, error) {
+	if i.tmuxSession == nil {
+		return "", fmt.Errorf("tmux session not initialized")
+	}
+	return i.tmuxSession.CapturePrimaryFullHistory()
 }
 
 // PreviewWindowFull returns the full scrollback of a specific tmux window.
