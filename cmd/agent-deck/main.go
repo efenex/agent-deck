@@ -2271,6 +2271,8 @@ func handleList(profile string, args []string) {
 			Color             string    `json:"color,omitempty"` // issue #391
 			Archived          bool      `json:"archived"`
 			ArchivedAt        time.Time `json:"archived_at,omitempty"`
+			CodexSessionID    string    `json:"codex_session_id,omitempty"`
+			ResolvedCodexHome string    `json:"resolved_codex_home,omitempty"`
 		}
 		// Warm tmux pane-title cache + load hook statuses so the CLI
 		// reports the same Status the TUI and /api/menu do (issue #610).
@@ -2299,6 +2301,8 @@ func handleList(profile string, args []string) {
 				Color:             inst.Color,
 				Archived:          inst.IsArchived(),
 				ArchivedAt:        inst.ArchivedAt,
+				CodexSessionID:    inst.CodexSessionID,
+				ResolvedCodexHome: inst.ResolvedCodexHome(),
 			}
 			if tmuxSess := inst.GetTmuxSession(); tmuxSess != nil {
 				sj.TmuxSession = tmuxSess.Name
@@ -2367,6 +2371,8 @@ func handleListAllProfiles(jsonOutput bool) {
 			CreatedAt         time.Time `json:"created_at"`
 			SSHHost           string    `json:"ssh_host,omitempty"`
 			SSHRemotePath     string    `json:"ssh_remote_path,omitempty"`
+			CodexSessionID    string    `json:"codex_session_id,omitempty"`
+			ResolvedCodexHome string    `json:"resolved_codex_home,omitempty"`
 		}
 		var allSessions []sessionJSON
 
@@ -2393,6 +2399,8 @@ func handleListAllProfiles(jsonOutput bool) {
 					CreatedAt:         inst.CreatedAt,
 					SSHHost:           inst.SSHHost,
 					SSHRemotePath:     inst.SSHRemotePath,
+					CodexSessionID:    inst.CodexSessionID,
+					ResolvedCodexHome: inst.ResolvedCodexHome(),
 				})
 			}
 		}
