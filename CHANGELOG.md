@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Deck titles are pushed to the agent (`push_title`, default on)**. Title sync was one-directional: agent-deck adopted the agent's session name, but a session you renamed in the deck kept the name Claude derives from its working directory — so `ListAgents` / `SendMessage` inside Claude Code resolved names that no longer matched anything on screen. Claude sessions now launch with `--name <slug of the deck title>` on every start, restart and resume, and renaming a live idle session delivers `/name <slug>` into the pane so it takes effect without a restart. Titles are slugged to lowercase kebab (48 chars max) and a `--name` you pass yourself via `--extra-arg` still wins. Set `push_title = false` to keep the sync inbound-only.
+
 - **Customizable terminal title with group/tree (`[display] title_format`)**. A new `[display] title_format` config option lets you template the outer terminal window/tab title with `{group}`, `{project}`, and `{name}` placeholders — e.g. `title_format = "{group}/{name}"` renders the full agent-deck group/tree path in the title instead of just `[<project>]`. The group path is exposed to tmux as a new `@agentdeck_group_path` user option and re-rendered live on rename and move-to-group. When unset, the historical `[<project>] <name>` format (and the `include_cwd_prefix` toggle) is preserved.
 
 ## [1.15.0] - 2026-08-23
