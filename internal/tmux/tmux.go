@@ -3005,11 +3005,16 @@ func (s *Session) buildStatusBarArgs() []string {
 // [display] include_cwd_prefix via SetHideCwdPrefixInTitle.
 var hideCwdPrefixInTitle atomic.Bool
 
+// hideCwdPrefixInTitleSet records that SetHideCwdPrefixInTitle was called, so
+// the config fallback below can tell "explicitly false" from "never set".
+var hideCwdPrefixInTitleSet atomic.Bool
+
 // SetHideCwdPrefixInTitle configures whether the terminal title includes the
 // "[<cwd-basename>]" prefix. Pass true to drop it (display.include_cwd_prefix =
 // false). Safe to call concurrently; intended to run once at startup.
 func SetHideCwdPrefixInTitle(hide bool) {
 	hideCwdPrefixInTitle.Store(hide)
+	hideCwdPrefixInTitleSet.Store(true)
 }
 
 // titleFormat, when non-empty, overrides the default set-titles-string with a
@@ -3036,8 +3041,61 @@ func SetTitleFormat(format string) {
 	titleFormat.Store(format)
 }
 
+// TitleSettingsProvider supplies the [display] title settings from the config
+// layer. It returns the title_format template and whether the "[<project>] "
+// prefix should be dropped (include_cwd_prefix = false).
+type TitleSettingsProvider func() (format string, hideCwdPrefix bool)
+
+// titleSettingsProvider is registered by internal/session at package init.
+// internal/session imports this package, so the registration is in place before
+// any Session exists — and this package cannot import the config layer back
+// without an import cycle, which is why the settings arrive as a callback.
+var titleSettingsProvider atomic.Value // holds TitleSettingsProvider
+
+// titleSettingsOnce bounds the config read to once per process.
+var titleSettingsOnce sync.Once
+
+// SetTitleSettingsProvider registers the config-backed fallback for the title
+// settings. Call once, from an init.
+func SetTitleSettingsProvider(p TitleSettingsProvider) {
+	if p != nil {
+		titleSettingsProvider.Store(p)
+	}
+}
+
+// ensureTitleSettings seeds the title settings from the config when nothing has
+// set them explicitly.
+//
+// Both settings used to be applied only by the TUI's config load, so any
+// one-shot process that writes set-titles-string — `agent-deck rename`, a move,
+// the web daemon, a CLI `session start` — rewrote the title back to the built-in
+// "[<project>] <name>" template and left it there until the TUI next touched the
+// session. From the operator's side a CLI rename simply undid their configured
+// title. Reading the config here, at the point of use, makes every entry point
+// agree without each one having to remember to call the setters.
+//
+// An explicit SetTitleFormat / SetHideCwdPrefixInTitle still wins: the TUI calls
+// both on startup and on every config reload, and those stores are not
+// overwritten.
+func ensureTitleSettings() {
+	titleSettingsOnce.Do(func() {
+		p, _ := titleSettingsProvider.Load().(TitleSettingsProvider)
+		if p == nil {
+			return
+		}
+		format, hideCwdPrefix := p()
+		if titleFormat.Load() == nil {
+			titleFormat.Store(format)
+		}
+		if !hideCwdPrefixInTitleSet.Load() {
+			hideCwdPrefixInTitle.Store(hideCwdPrefix)
+		}
+	})
+}
+
 // getTitleFormat returns the configured custom title template, or "" if unset.
 func getTitleFormat() string {
+	ensureTitleSettings()
 	if v := titleFormat.Load(); v != nil {
 		return v.(string)
 	}
@@ -3063,6 +3121,8 @@ func (s *Session) buildTerminalTitleArgs() []string {
 	}
 	if _, overridden := s.OptionOverrides["set-titles-string"]; !overridden {
 		titleStr := "[#{@agentdeck_project_name}] #{@agentdeck_display_name}"
+		// getTitleFormat runs ensureTitleSettings, so the config fallback for
+		// hideCwdPrefixInTitle below is already seeded by the time it is read.
 		if custom := getTitleFormat(); custom != "" {
 			titleStr = titleFormatReplacer.Replace(custom)
 		} else if hideCwdPrefixInTitle.Load() {
