@@ -941,7 +941,8 @@ type Home struct {
 	remoteLatencyMu         sync.RWMutex
 	lastRemoteLatencyFetch  time.Time
 	remoteLatencyFetchBusy  bool
-	remoteLatencyRefreshSec int // resolved once at construction
+	remoteLatencyBusySince  time.Time // when the in-flight batch was armed
+	remoteLatencyRefreshSec int       // resolved once at construction
 	// #1101: remote cost summaries fetched alongside session listings so the
 	// status-line cost segment reflects spend on every configured remote, not
 	// just events written to the local cost_events table.
@@ -4649,18 +4650,7 @@ func (h *Home) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// to system_stats.refresh_seconds so the marker ticks alongside
 		// CPU/RAM. Fast/non-blocking — each remote runs in its own
 		// goroutine inside the Cmd.
-		refresh := h.remoteLatencyRefreshSec
-		if refresh < 2 {
-			refresh = 5
-		}
-		h.remoteLatencyMu.RLock()
-		shouldLatency := !h.remoteLatencyFetchBusy &&
-			time.Since(h.lastRemoteLatencyFetch) >= time.Duration(refresh)*time.Second
-		h.remoteLatencyMu.RUnlock()
-		if shouldLatency {
-			h.remoteLatencyMu.Lock()
-			h.remoteLatencyFetchBusy = true
-			h.remoteLatencyMu.Unlock()
+		if h.armRemoteLatencyFetch(time.Now()) {
 			remoteLatencyCmd = h.measureRemoteLatencies
 		}
 
