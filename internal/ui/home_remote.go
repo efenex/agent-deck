@@ -1058,6 +1058,34 @@ func (h *Home) shouldFetchRemoteSessions(now time.Time) bool {
 	return !h.remotesFetchActive && now.Sub(h.lastRemoteFetch) >= time.Duration(interval)*time.Second
 }
 
+// remoteLatencyBusyStale is how long an armed latency batch may go without
+// reporting before the tick re-arms it. The batch itself is capped at 8 s.
+const remoteLatencyBusyStale = 30 * time.Second
+
+// armRemoteLatencyFetch reports whether this tick should start a latency
+// batch, and marks one in flight if so. A batch whose result never arrived
+// (its Cmd dropped by an early return, or stuck in I/O) is re-armed after
+// remoteLatencyBusyStale: v1.16.7's update re-check returned from the tick
+// after the flag was set, and the header kept its pre-network "offline"
+// marker for the life of the process.
+func (h *Home) armRemoteLatencyFetch(now time.Time) bool {
+	refresh := h.remoteLatencyRefreshSec
+	if refresh < 2 {
+		refresh = 5
+	}
+	h.remoteLatencyMu.Lock()
+	defer h.remoteLatencyMu.Unlock()
+	if h.remoteLatencyFetchBusy && now.Sub(h.remoteLatencyBusySince) < remoteLatencyBusyStale {
+		return false
+	}
+	if now.Sub(h.lastRemoteLatencyFetch) < time.Duration(refresh)*time.Second {
+		return false
+	}
+	h.remoteLatencyFetchBusy = true
+	h.remoteLatencyBusySince = now
+	return true
+}
+
 // measureRemoteLatencies measures round-trip latency to every configured
 // remote in parallel, returning a map keyed by remote name. Failed
 // measurements are recorded as Offline=true so the header can show
