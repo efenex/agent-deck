@@ -567,6 +567,9 @@ func main() {
 		case "config":
 			handleConfig(profile, args[1:])
 			return
+		case "view":
+			handleView(profile, args[1:])
+			return
 		case "web":
 			webEnabled = true
 			var err error
@@ -1485,7 +1488,7 @@ var commandRegistry = map[string]bool{
 	"group": true, "try": true, "launch": true, "conductor": true,
 	"agents": true, "agent": true,
 	"telegram-doctor": true, "watcher": true, "openclaw": true, "oc": true,
-	"remote": true, "remote-agent": true, "system": true, "worktree": true, "wt": true, "costs": true, "open": true, "file": true, "events": true, "daemon": true, "usage": true, "web": true, "config": true, "recall": true,
+	"remote": true, "remote-agent": true, "system": true, "worktree": true, "wt": true, "costs": true, "open": true, "file": true, "events": true, "daemon": true, "usage": true, "web": true, "config": true, "view": true, "recall": true,
 	"uninstall": true, "migrate-paths": true, "hook-handler": true,
 	"codex-notify": true, "hooks": true, "codex-hooks": true, "gemini-hooks": true,
 	"hermes-hooks": true, "cursor-hooks": true, "tmux-hooks": true, "pi-hooks": true, "deepseek": true, "notify-daemon": true,
@@ -4511,6 +4514,7 @@ func printHelp() {
 	fmt.Println("  group            Manage groups")
 	fmt.Println("  worktree, wt     Manage git worktrees")
 	fmt.Println("  usage            Show remaining provider subscription quota")
+	fmt.Println("  view             Show the TUI's saved session-list filter")
 	fmt.Println("  recall           Search every Claude conversation on this machine (docs/recall.md)")
 	fmt.Println("  web              Start TUI with web UI server running alongside")
 	fmt.Println("  remote           Manage remote agent-deck instances")

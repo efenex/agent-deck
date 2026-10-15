@@ -87,3 +87,25 @@ func TestTimeFilterModeCycle(t *testing.T) {
 		}
 	}
 }
+
+func TestTimeFilterModeSince(t *testing.T) {
+	now := time.Date(2026, 10, 16, 14, 30, 0, 0, time.Local)
+	if _, ok := TimeFilterAll.Since(now); ok {
+		t.Fatal("TimeFilterAll should have no lower bound")
+	}
+	want := map[TimeFilterMode]time.Time{
+		TimeFilterToday:  time.Date(2026, 10, 16, 0, 0, 0, 0, time.Local),
+		TimeFilter3Days:  now.Add(-3 * 24 * time.Hour),
+		TimeFilter7Days:  now.Add(-7 * 24 * time.Hour),
+		TimeFilter30Days: now.Add(-30 * 24 * time.Hour),
+	}
+	for m, w := range want {
+		got, ok := m.Since(now)
+		if !ok || !got.Equal(w) {
+			t.Errorf("%s.Since = %v, %v; want %v", m.Label(), got, ok, w)
+		}
+		if !m.Matches(w, now) || m.Matches(w.Add(-time.Nanosecond), now) {
+			t.Errorf("%s.Matches disagrees with Since at the boundary", m.Label())
+		}
+	}
+}
