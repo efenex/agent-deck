@@ -53,18 +53,26 @@ func (m TimeFilterMode) Label() string {
 // day-boundary fuzziness that matters for "today" is negligible at 3-30 days,
 // and a rolling window avoids re-deriving "N calendar days ago" per timezone.
 func (m TimeFilterMode) Matches(t, now time.Time) bool {
+	since, ok := m.Since(now)
+	return !ok || !t.Before(since)
+}
+
+// Since returns the earliest last-activity time this mode admits, evaluated
+// relative to now; ok is false for TimeFilterAll (no lower bound). It is the
+// window Matches applies, exposed so a client outside the TUI (`agent-deck
+// view --json`) can apply the same filter without re-deriving the boundaries.
+func (m TimeFilterMode) Since(now time.Time) (since time.Time, ok bool) {
 	switch m {
 	case TimeFilterToday:
 		y, mo, d := now.Date()
-		startOfToday := time.Date(y, mo, d, 0, 0, 0, 0, now.Location())
-		return !t.Before(startOfToday)
+		return time.Date(y, mo, d, 0, 0, 0, 0, now.Location()), true
 	case TimeFilter3Days:
-		return !t.Before(now.Add(-3 * 24 * time.Hour))
+		return now.Add(-3 * 24 * time.Hour), true
 	case TimeFilter7Days:
-		return !t.Before(now.Add(-7 * 24 * time.Hour))
+		return now.Add(-7 * 24 * time.Hour), true
 	case TimeFilter30Days:
-		return !t.Before(now.Add(-30 * 24 * time.Hour))
+		return now.Add(-30 * 24 * time.Hour), true
 	default:
-		return true
+		return time.Time{}, false
 	}
 }
