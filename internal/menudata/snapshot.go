@@ -97,6 +97,9 @@ type MenuSession struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	LastAccessedAt time.Time `json:"lastAccessedAt,omitempty"`
 	ArchivedAt     time.Time `json:"archivedAt,omitempty"`
+	// LastActivityAt is Instance.DisplayLastActivityTime, the time the TUI's
+	// recency filter (`*`, see `agent-deck view`) tests against.
+	LastActivityAt time.Time `json:"lastActivityAt,omitempty"`
 
 	// Fields below mirror *session.Instance state visible in the TUI
 	// EditSessionDialog. Promoted from MISSING in tests/web/PARITY_MATRIX.md
@@ -192,6 +195,7 @@ func ToMenuSession(inst *session.Instance) *MenuSession {
 		CreatedAt:          inst.CreatedAt,
 		LastAccessedAt:     inst.LastAccessedAt,
 		ArchivedAt:         inst.ArchivedAtThreadSafe(),
+		LastActivityAt:     inst.DisplayLastActivityTime(),
 		IsConductor:        inst.IsConductor,
 		ConductorName:      inst.ResolveConductorNameThreadSafe(),
 		ClaudeSessionID:    inst.ClaudeSessionID,
