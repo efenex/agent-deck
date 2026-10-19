@@ -6656,6 +6656,10 @@ func (i *Instance) updateStatus(pass *StatusUpdatePass, syncMetadata bool) error
 
 	// A cached positive tmux hit may outlive Kill(). Confirm a stopped
 	// session directly before treating it as started again.
+	// Remember that we revived it: even a direct probe can race a kill made by
+	// another process, in which case the hook fast path below must not read the
+	// SessionEnd that goes with that kill as a crash.
+	revivedFromStopped := false
 	if i.Status == StatusStopped {
 		s := i.tmuxSession
 		stopRevision := i.stopRevision
@@ -6670,6 +6674,7 @@ func (i *Instance) updateStatus(pass *StatusUpdatePass, syncMetadata bool) error
 			return nil
 		}
 		i.Status = StatusRunning
+		revivedFromStopped = true
 	}
 
 	// Session exists - clear error check timestamp
@@ -6827,7 +6832,15 @@ func (i *Instance) updateStatus(pass *StatusUpdatePass, syncMetadata bool) error
 				}
 			}
 		case "dead":
-			i.Status = StatusError
+			if revivedFromStopped {
+				// SessionEnd on a session recorded as stopped is the stop itself
+				// (e.g. `agent-deck session stop` ran in another process), not a
+				// crash. A real restart emits a newer non-dead hook.
+				i.Status = StatusStopped
+				i.lastErrorCheck = time.Now()
+			} else {
+				i.Status = StatusError
+			}
 		}
 		if i.hookSessionID != "" {
 			switch {
