@@ -4,6 +4,7 @@
     "kind": "system",
     "ts": "2026-09-23T08:00:02.000Z",
     "title": "SessionStart · hook_additional_context",
+    "origin": "hook",
     "raw_type": "attachment/hook_additional_context"
   },
   {
@@ -11,6 +12,7 @@
     "kind": "user",
     "ts": "2026-09-23T08:00:03.000Z",
     "body": "Write hello.py, नमस्ते 🚀",
+    "origin": "human",
     "raw_type": "user"
   },
   {
@@ -115,6 +117,7 @@
         "kind": "user",
         "ts": "2026-09-23T08:00:11.000Z",
         "body": "Count hello.py lines",
+        "origin": "human",
         "raw_type": "user"
       },
       {
@@ -235,6 +238,7 @@
     "ts": "2026-09-23T08:00:17.000Z",
     "body": "MIDTURN: are you there?",
     "queued": false,
+    "origin": "human",
     "meta": {
       "delivery": "absorbed"
     },
@@ -246,6 +250,7 @@
     "ts": "2026-09-23T08:00:18.000Z",
     "title": "Agent \"x\" finished",
     "body": "\u003ctask-notification\u003e\n\u003csummary\u003eAgent \"x\" finished\u003c/summary\u003e\n\u003c/task-notification\u003e",
+    "origin": "task-notification",
     "raw_type": "attachment/queued_command"
   },
   {
@@ -254,6 +259,7 @@
     "ts": "2026-09-23T08:00:19.000Z",
     "title": "PreToolUse:Bash · hook_blocking_error",
     "body": "blocked: rm is not allowed",
+    "origin": "hook",
     "raw_type": "attachment/hook_blocking_error"
   },
   {
@@ -262,6 +268,7 @@
     "ts": "2026-09-23T08:00:21.000Z",
     "title": "Stop hook: hook exploded",
     "body": "hook exploded",
+    "origin": "hook",
     "raw_type": "system/stop_hook_summary"
   },
   {
@@ -279,6 +286,7 @@
     "kind": "user",
     "ts": "2026-09-23T08:00:24.000Z",
     "body": "next task please",
+    "origin": "human",
     "raw_type": "user"
   },
   {
@@ -287,6 +295,7 @@
     "ts": "2026-09-23T08:00:25.000Z",
     "title": "[INBOX] child finished",
     "body": "[INBOX] child finished",
+    "origin": "hook",
     "raw_type": "user"
   },
   {
@@ -295,6 +304,7 @@
     "ts": "2026-09-23T08:00:26.000Z",
     "title": "Stop hook feedback:",
     "body": "Stop hook feedback:\nrun the tests",
+    "origin": "hook",
     "raw_type": "user"
   },
   {
@@ -303,6 +313,7 @@
     "ts": "2026-09-23T08:00:27.000Z",
     "title": "/loop 5m check",
     "body": "\u003ccommand-message\u003eloop\u003c/command-message\u003e\n\u003ccommand-name\u003e/loop\u003c/command-name\u003e\n\u003ccommand-args\u003e5m check\u003c/command-args\u003e",
+    "origin": "human",
     "raw_type": "user"
   },
   {
@@ -310,6 +321,7 @@
     "kind": "user",
     "ts": "2026-09-23T08:00:28.000Z",
     "body": "what is this?",
+    "origin": "human",
     "meta": {
       "images": 1
     },
@@ -332,6 +344,7 @@
     "ts": "2026-09-23T08:00:30.000Z",
     "title": "Compaction summary",
     "body": "This session is being continued...",
+    "origin": "system",
     "raw_type": "user"
   },
   {
@@ -340,6 +353,7 @@
     "ts": "2026-09-23T08:00:31.000Z",
     "title": "/model opus",
     "body": "\u003ccommand-name\u003e/model\u003c/command-name\u003e\n\u003ccommand-args\u003eopus\u003c/command-args\u003e",
+    "origin": "human",
     "raw_type": "system/local_command"
   },
   {
