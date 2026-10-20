@@ -371,3 +371,30 @@ func TestListInstanceAnnotations_GroupsByInstance(t *testing.T) {
 		t.Fatalf("i3 = %+v; want ticket=ENG-1 and no tags", i3)
 	}
 }
+
+// A conversation id an instance held before a /clear is still found: that
+// is how `recall chain` takes an old id.
+func TestSessionIDsByNativeID_FindsDemotedLinks(t *testing.T) {
+	db := openTestDB(t)
+	seedInstance(t, db, "i1", json.RawMessage(`{}`))
+	seedInstance(t, db, "i2", json.RawMessage(`{}`))
+	t0 := time.Unix(1_700_000_000, 0)
+	for _, w := range []struct{ id, native string }{{"i1", "claude-a"}, {"i1", "claude-b"}, {"i2", "claude-c"}} {
+		if err := db.WriteClaudeSessionBinding(w.id, w.native, t0); err != nil {
+			t.Fatal(err)
+		}
+		t0 = t0.Add(time.Minute)
+	}
+	for native, want := range map[string][]string{"claude-a": {"i1"}, "claude-b": {"i1"}, "claude-c": {"i2"}, "claude-none": nil} {
+		got, err := db.SessionIDsByNativeID("claude", native)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(want) || (len(want) == 1 && got[0] != want[0]) {
+			t.Errorf("SessionIDsByNativeID(%s) = %v, want %v", native, got, want)
+		}
+	}
+	if got, _ := db.SessionIDsByNativeID("codex", "claude-a"); len(got) != 0 {
+		t.Errorf("harness is part of the key: %v", got)
+	}
+}

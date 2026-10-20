@@ -446,6 +446,28 @@ func (s *StateDB) ListSessionLinks(sessionID string) ([]SessionLink, error) {
 	return out, rows.Err()
 }
 
+// SessionIDsByNativeID returns the instances that ever held a harness
+// conversation id, whether or not it is still their current one. A /clear
+// leaves the old id behind as a non-authoritative link, so this is how an
+// old conversation id finds its deck session.
+func (s *StateDB) SessionIDsByNativeID(harness, nativeID string) ([]string, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT session_id FROM session_links WHERE harness = ? AND native_id = ? ORDER BY session_id`,
+		harness, nativeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // AuthoritativeLinkOwner returns the instance an authoritative link binds
 // to a harness conversation id ("" when none). The recall index binds
 // session.deck_id only through this, never by working directory.

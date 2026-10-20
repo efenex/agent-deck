@@ -1124,7 +1124,8 @@ In the TUI, remote sessions use the same status indicators and nested group tree
 ### remote conversation and status reads
 
 ```bash
-agent-deck remote <name> recall timeline <session> --json [--tail N | --since <cursor> | --before <before_cursor> --limit N]
+agent-deck remote <name> recall timeline <session> --json [--tail N | --since <cursor> | --before <before_cursor> --limit N] [--chain]
+agent-deck remote <name> recall chain <session> --json
 agent-deck remote <name> recall follow <session> --after <cursor|end> --jsonl [--status]
 agent-deck remote <name> events follow --jsonl [--since <cursor>] [--kind <prefix,...>] [--session <id>]
 agent-deck remote <name> session send-status <send-id> --json

@@ -291,7 +291,7 @@ func helpSpecs() []goldenSpec {
 		"file bundle",
 		// Probed by clients (the macOS app) for feature detection.
 		"session image-upload", "session send-status", "session queue",
-		"usage statusline", "recall timeline", "recall follow",
+		"usage statusline", "recall timeline", "recall follow", "recall chain",
 		"events follow", "events publish",
 	}
 
