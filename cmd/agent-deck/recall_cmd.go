@@ -46,6 +46,7 @@ Commands:
   show <session>   One session: card, derived summary, tools, files, messages
   timeline <session>  Ordered typed conversation turns with a resume cursor
   follow <session>    Stream new turns after a timeline cursor as JSONL
+  chain <session>     The native conversations a session has been across /clear, oldest first
   context <session>  Render a session as context for any harness; --into current delivers it to this session
   open <session>   Relaunch a session (start its deck session, or resume a Claude conversation)
   enrich           Drain the classifier queue (where did we lose time, session kind, outcome)
@@ -91,6 +92,8 @@ func handleRecall(profile string, args []string) {
 		handleRecallTimeline(profile, args[1:])
 	case "follow":
 		handleRecallFollow(profile, args[1:])
+	case "chain":
+		handleRecallChain(profile, args[1:])
 	case "open":
 		handleRecallOpen(profile, args[1:])
 	case "context":

@@ -199,16 +199,16 @@ func TestRowsOriginCodexAndV1(t *testing.T) {
 	}
 }
 
-// TestMergeRowKeepsOrigin: update frames patch origin like
+// TestMergeRowKeepsOriginAndSeg: update frames patch origin and seg like
 // every other field, and an absent patch leaves them alone.
-func TestMergeRowKeepsOrigin(t *testing.T) {
-	dst := Row{ID: "r", Origin: "human"}
+func TestMergeRowKeepsOriginAndSeg(t *testing.T) {
+	dst := Row{ID: "r", Origin: "human", Seg: "s1"}
 	MergeRow(&dst, Row{ID: "r", Body: "x"})
-	if dst.Origin != "human" {
+	if dst.Origin != "human" || dst.Seg != "s1" {
 		t.Fatalf("empty patch cleared fields: %+v", dst)
 	}
-	MergeRow(&dst, Row{ID: "r", Origin: "peer:a"})
-	if dst.Origin != "peer:a" {
+	MergeRow(&dst, Row{ID: "r", Origin: "peer:a", Seg: "s2"})
+	if dst.Origin != "peer:a" || dst.Seg != "s2" {
 		t.Fatalf("patch did not apply: %+v", dst)
 	}
 }

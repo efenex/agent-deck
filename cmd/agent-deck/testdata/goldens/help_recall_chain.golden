@@ -1,0 +1,6 @@
+Usage: agent-deck recall chain <session> --json
+The native conversations a deck session has been, oldest first: /clear and /new start a new one under the same session.
+<session>: deck session id, title or id prefix, or a conversation id the session ever held. Works with [recall] off.
+Page rows across the chain with: agent-deck recall timeline <session> --json --chain --tail N
+  -json
+    	Output canonical JSON
