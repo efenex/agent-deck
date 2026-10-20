@@ -4,6 +4,7 @@
     "kind": "user",
     "ts": "2026-09-23T08:00:02.000Z",
     "body": "Run hello.py",
+    "origin": "human",
     "meta": {
       "images": 1
     },
