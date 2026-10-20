@@ -1,4 +1,4 @@
-Usage: agent-deck recall timeline <session> --json [--since <cursor> | --before <cursor> --limit N] [--limit N] [--tail N] [--agent <id>]
+Usage: agent-deck recall timeline <session> --json [--since <cursor> | --before <cursor> --limit N] [--limit N] [--tail N] [--agent <id>] [--chain]
        agent-deck recall timeline --json --transcript <file> --harness claude|codex
        agent-deck recall timeline <session> --json --v1   (slice-6 turn shape)
 <session>: deck session id, title or id prefix; a Claude/Codex conversation id; or #n / any id the index knows.
@@ -7,6 +7,8 @@ Rows are parsed from the native transcript directly, whatever the index or its d
     	One Claude Code sub-agent sidechain by agent id
   -before string
     	Return older rows before this before_cursor (requires --limit N)
+  -chain
+    	Span the session's /clear chain: --tail fills across conversations, --before pages back through them (see recall chain)
   -harness string
     	With --transcript: claude or codex
   -json

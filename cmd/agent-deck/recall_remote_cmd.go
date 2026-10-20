@@ -25,7 +25,7 @@ import (
 
 // remoteRecallVerbs are the read-only recall verbs a remote may be asked
 // to run. Nothing here writes on the remote or opens a controller path.
-var remoteRecallVerbs = map[string]bool{"search": true, "sessions": true, "show": true, "context": true, "export": true, "status": true, "timeline": true, "follow": true}
+var remoteRecallVerbs = map[string]bool{"search": true, "sessions": true, "show": true, "context": true, "export": true, "status": true, "timeline": true, "follow": true, "chain": true}
 
 // remoteRecallOptions is the closed option set per verb (true: takes a
 // value), mirroring remoteSwitchOptions: an unknown option is refused
@@ -40,8 +40,9 @@ var remoteRecallOptions = map[string]map[string]bool{
 	"context":  {"tier": true, "budget": true, "json": false},
 	"export":   {"since": true, "cards": false, "json": false},
 	"status":   {"json": false},
-	"timeline": {"json": false, "tail": true, "since": true, "before": true, "limit": true, "agent": true, "v1": false},
+	"timeline": {"json": false, "tail": true, "since": true, "before": true, "limit": true, "agent": true, "chain": false, "v1": false},
 	"follow":   {"jsonl": false, "after": true, "status": false, "agent": true, "v1": false},
+	"chain":    {"json": false},
 }
 
 // validateRemoteRecallArgs checks `recall <verb> ...` before it is
@@ -53,7 +54,7 @@ func validateRemoteRecallArgs(args []string) error {
 	}
 	verb := args[0]
 	if !remoteRecallVerbs[verb] {
-		return fmt.Errorf("unsupported remote command %q; remote recall forwards search, sessions, show, context, export, status, timeline and follow only", "recall "+strings.Join(args, " "))
+		return fmt.Errorf("unsupported remote command %q; remote recall forwards search, sessions, show, context, export, status, timeline, follow and chain only", "recall "+strings.Join(args, " "))
 	}
 	rest := args[1:]
 	if len(rest) == 1 && (rest[0] == "--help" || rest[0] == "-h") {
