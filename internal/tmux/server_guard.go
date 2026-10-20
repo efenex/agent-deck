@@ -203,8 +203,13 @@ func listTmuxServersPS() ([]tmuxServerProc, error) {
 		return nil, fmt.Errorf("ps: %w", err)
 	}
 	servers := parseTmuxServersPS(string(out), os.Getuid(), os.Getenv)
+	pids := make([]int, 0, len(servers))
+	for _, s := range servers {
+		pids = append(pids, s.PID)
+	}
+	bound := boundSocketsOf(pids)
 	for i := range servers {
-		if path := boundSocketOf(servers[i].PID); path != "" {
+		if path := bound[servers[i].PID]; path != "" {
 			servers[i].Socket = path
 			servers[i].SocketExact = true
 		}
@@ -212,23 +217,43 @@ func listTmuxServersPS() ([]tmuxServerProc, error) {
 	return servers, nil
 }
 
-// boundSocketOf returns the path of the unix socket pid has bound, from the
-// kernel's view (it survives the path being unlinked, which is exactly the
-// lost-socket case), or "" when it cannot tell. darwin and most Linux boxes
-// have lsof; Linux without it falls back to /proc.
-var boundSocketOf = func(pid int) string {
+// boundSocketsOf returns, per pid, the path of the unix socket it has bound,
+// from the kernel's view (it survives the path being unlinked, which is
+// exactly the lost-socket case). Pids it cannot tell are absent. One lsof for
+// all pids (darwin and most Linux boxes); Linux without lsof falls back to
+// /proc.
+var boundSocketsOf = func(pids []int) map[int]string {
+	out := make(map[int]string, len(pids))
+	if len(pids) == 0 {
+		return out
+	}
+	list := make([]string, 0, len(pids))
+	for _, p := range pids {
+		list = append(list, strconv.Itoa(p))
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	// #nosec G204 -- fixed binary; pid is an integer.
-	out, err := exec.CommandContext(ctx, "lsof", "-a", "-U", "-p", strconv.Itoa(pid), "-F", "n").Output()
-	if err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.HasPrefix(line, "n/") {
-				return filepath.Clean(strings.TrimPrefix(line, "n"))
+	// #nosec G204 -- fixed binary; pids are integers.
+	raw, _ := exec.CommandContext(ctx, "lsof", "-a", "-U", "-p", strings.Join(list, ","), "-F", "pn").Output()
+	cur := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		switch {
+		case strings.HasPrefix(line, "p"):
+			cur, _ = strconv.Atoi(line[1:])
+		case strings.HasPrefix(line, "n/") && cur != 0:
+			if _, ok := out[cur]; !ok {
+				out[cur] = filepath.Clean(line[1:])
 			}
 		}
 	}
-	return boundSocketFromProc(pid)
+	for _, p := range pids {
+		if _, ok := out[p]; !ok {
+			if path := boundSocketFromProc(p); path != "" {
+				out[p] = path
+			}
+		}
+	}
+	return out
 }
 
 // boundSocketFromProc maps pid's socket fds to /proc/net/unix paths. Linux
@@ -431,8 +456,17 @@ func reportServerEvent(ev ServerRecoveryEvent, key string) {
 	}
 	serverAlerts.last[k] = time.Now()
 	serverAlerts.Unlock()
-	notifyServerEvent(ev)
+	// Off the caller's goroutine: the status poller calls in with i.mu held,
+	// and a notifier may take up to its dispatch timeout.
+	if reportSync {
+		notifyServerEvent(ev)
+		return
+	}
+	go notifyServerEvent(ev)
 }
+
+// reportSync delivers notifications inline. Tests only.
+var reportSync bool
 
 // PrecheckServerStart must run before any tmux command that can start a server
 // on socketName. It returns nil when starting is safe (socket reachable, or no
@@ -445,6 +479,13 @@ func PrecheckServerStart(socketName string) error {
 func precheckServerStartAt(path string) error {
 	state := classifySocket(path)
 	if state == socketRefused || state == socketTimeout {
+		// tmux leaves its socket file behind when the server exits, so a
+		// refusing socket is usually just stale. Settle that first (one ps)
+		// rather than make every launch after a clean exit wait out the backoff.
+		if servers, err := serversFor(path); err == nil && len(servers) == 0 {
+			statusLog.Info("tmux_socket_stale_no_server", slog.String("socket", path))
+			return nil
+		}
 		for _, d := range serverReachBackoff {
 			guardSleep(d)
 			if state = classifySocket(path); state != socketRefused && state != socketTimeout {
@@ -568,6 +609,17 @@ func recoverLostSocketAt(path string) recoveryResult {
 			reportServerEvent(ServerRecoveryEvent{Socket: path, Action: "usr1-recreated",
 				Detail: fmt.Sprintf("socket %s was missing; SIGUSR1 made tmux server pid %d re-create it", path, pid)}, "")
 			return recoveryResult{action: "usr1-recreated"}
+		}
+		for _, srv := range servers {
+			if srv.SocketExact {
+				// The kernel says this live server owns the path. It did not
+				// rebind in time (stalled?); it will when it runs, and would
+				// then unlink whatever a new-session created now. Refuse.
+				detail := fmt.Sprintf("%s is missing; owner tmux server pid %d is alive but did not re-create it within %s after SIGUSR1",
+					path, srv.PID, usr1Settle)
+				reportServerEvent(ServerRecoveryEvent{Socket: path, Action: "recovery-failed", Detail: detail}, strconv.Itoa(srv.PID))
+				return recoveryResult{action: "recovery-failed", err: fmt.Errorf("%w: %s", ErrServerUnreachable, detail)}
+			}
 		}
 		statusLog.Info("tmux_socket_missing_candidates_serve_elsewhere", slog.String("socket", path), slog.Int("candidates", len(servers)))
 		return recoveryResult{}
@@ -715,7 +767,9 @@ var socketHealth struct {
 	ino        map[string]uint64
 	inoChanged map[string]time.Time
 	vanished   map[string]map[string]time.Time
-	recovering map[string]time.Time
+	// firstVanish: when each session was FIRST seen vanished in the window.
+	firstVanish map[string]map[string]time.Time
+	recovering  map[string]time.Time
 }
 
 // massVanishWindow is how recently sessions must have vanished, and the socket
@@ -744,7 +798,11 @@ func observeSocketIdentityAt(path string) {
 		socketHealth.ino = make(map[string]uint64)
 		socketHealth.inoChanged = make(map[string]time.Time)
 	}
-	if prev, ok := socketHealth.ino[path]; ok && prev != ino {
+	// Only a socket file REPLACED by another counts: a new server binding a
+	// path that had no socket (the first start, or a start after the last
+	// server exited) is not a steal, and a socket disappearing is handled as
+	// "missing" elsewhere.
+	if prev, ok := socketHealth.ino[path]; ok && prev != 0 && ino != 0 && prev != ino {
 		socketHealth.inoChanged[path] = time.Now()
 	}
 	socketHealth.ino[path] = ino
@@ -761,10 +819,13 @@ func (s *Session) AbsenceVerdictHeld() bool {
 }
 
 func absenceVerdictHeldAt(path, name string) bool {
+	// Observe the socket file before recording the vanish, so a replacement
+	// the refresh tick has not seen yet still dates before this vanish.
+	observeSocketIdentityAt(path)
 	suspect, reason := socketSuspectAt(path)
 	vanishedCount := noteVanish(path, name)
 	if !suspect {
-		if vanishedCount < 2 || !identityChangedRecently(path) {
+		if vanishedCount < 2 || !identityChangedRecently(path) || vanishedSinceIdentityChange(path) < 2 {
 			return false
 		}
 		reason = fmt.Sprintf("%d sessions vanished within %s of the socket being re-created", vanishedCount, massVanishWindow)
@@ -788,6 +849,22 @@ func noteVanish(path, name string) int {
 	}
 	now := time.Now()
 	m[name] = now
+	if socketHealth.firstVanish == nil {
+		socketHealth.firstVanish = make(map[string]map[string]time.Time)
+	}
+	fv := socketHealth.firstVanish[path]
+	if fv == nil {
+		fv = make(map[string]time.Time)
+		socketHealth.firstVanish[path] = fv
+	}
+	if _, seen := fv[name]; !seen {
+		fv[name] = now
+	}
+	for k, t := range fv {
+		if now.Sub(t) > massVanishWindow {
+			delete(fv, k)
+		}
+	}
 	n := 0
 	for k, t := range m {
 		if now.Sub(t) > massVanishWindow {
@@ -795,6 +872,22 @@ func noteVanish(path, name string) int {
 			continue
 		}
 		n++
+	}
+	return n
+}
+
+// vanishedSinceIdentityChange counts sessions first seen vanished after the
+// socket file was last replaced. Sessions that were already gone before (a
+// stopped session re-probed) are not part of a mass vanish.
+func vanishedSinceIdentityChange(path string) int {
+	socketHealth.Lock()
+	defer socketHealth.Unlock()
+	changed := socketHealth.inoChanged[path]
+	n := 0
+	for _, t := range socketHealth.firstVanish[path] {
+		if !t.Before(changed) {
+			n++
+		}
 	}
 	return n
 }
@@ -911,6 +1004,7 @@ func resetServerGuardState() {
 	socketHealth.ino = nil
 	socketHealth.inoChanged = nil
 	socketHealth.vanished = nil
+	socketHealth.firstVanish = nil
 	socketHealth.recovering = nil
 	socketHealth.Unlock()
 	serverAlerts.Lock()
@@ -931,9 +1025,11 @@ func SetSocketGuardForTest(suspect func(path string) (bool, string), notify func
 		notifyServerEvent = notify
 	}
 	runRecoveryAsync = func(func()) {}
+	reportSync = true
 	resetServerGuardState()
 	return func() {
 		socketSuspectOverride, notifyServerEvent, runRecoveryAsync = prevSuspect, prevNotify, prevAsync
+		reportSync = false
 		resetServerGuardState()
 	}
 }

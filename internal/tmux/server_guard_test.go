@@ -37,11 +37,13 @@ func guardTestEnv(t *testing.T) *[]ServerRecoveryEvent {
 		*events = append(*events, ev)
 		mu.Unlock()
 	}
+	reportSync = true
 	runRecoveryAsync = func(fn func()) { fn() }
 	resetServerGuardState()
 	t.Cleanup(func() {
 		serverReachBackoff, guardSleep, usr1Settle, notifyServerEvent = prevBackoff, prevSleep, prevSettle, prevNotify
 		listTmuxServers, signalServer, runRecoveryAsync = prevList, prevSignal, prevAsync
+		reportSync = false
 		resetServerGuardState()
 	})
 	return events
@@ -484,5 +486,40 @@ func TestParseTmuxServersPS(t *testing.T) {
 func TestServerGuard_SignalSeamRefusesUnregisteredPID(t *testing.T) {
 	if err := signalServer(os.Getppid(), 0); err == nil {
 		t.Fatal("a test binary must not signal a pid it did not register")
+	}
+}
+
+// A missing socket whose kernel-confirmed owner is alive but does not rebind
+// (stalled) must refuse the launch: the owner would rebind later and unlink
+// whatever a new-session created now.
+func TestServerGuard_MissingSocketExactOwnerNoRebindRefuses(t *testing.T) {
+	events := guardTestEnv(t)
+	usr1Settle = 50 * time.Millisecond
+	path := filepath.Join(shortTempDir(t), "s")
+	listTmuxServers = func() ([]tmuxServerProc, error) {
+		return []tmuxServerProc{{PID: 900005, Started: time.Now().Add(-time.Hour), Socket: path, SocketExact: true}}, nil
+	}
+	signalServer = func(int, syscall.Signal) error { return nil }
+	err := precheckServerStartAt(path)
+	if !errors.Is(err, ErrServerUnreachable) {
+		t.Fatalf("precheck = %v, want ErrServerUnreachable", err)
+	}
+	if len(*events) != 1 || (*events)[0].Action != "recovery-failed" {
+		t.Fatalf("want one recovery-failed alert, got %+v", *events)
+	}
+}
+
+// A guessed (argv) candidate that does not rebind served some other path:
+// starting fresh is allowed.
+func TestServerGuard_MissingSocketGuessedOwnerNoRebindAllows(t *testing.T) {
+	guardTestEnv(t)
+	usr1Settle = 50 * time.Millisecond
+	path := filepath.Join(shortTempDir(t), "s")
+	listTmuxServers = func() ([]tmuxServerProc, error) {
+		return []tmuxServerProc{{PID: 900006, Started: time.Now().Add(-time.Hour), Socket: path}}, nil
+	}
+	signalServer = func(int, syscall.Signal) error { return nil }
+	if err := precheckServerStartAt(path); err != nil {
+		t.Fatalf("precheck = %v, want nil", err)
 	}
 }

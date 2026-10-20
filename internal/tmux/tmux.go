@@ -304,6 +304,12 @@ func RefreshSessionCache() {
 	finish := logging.TraceOp(perfLog, "refresh_session_cache", 100*time.Millisecond)
 	defer finish()
 
+	// Remember which socket file the sessions were seen under, so a later mass
+	// vanish can tell a replaced socket (a steal) from sessions ending. Before
+	// the pipe path, which returns early: its control connection survives the
+	// socket being replaced. One stat per tick.
+	ObserveSocketIdentity(DefaultSocketName())
+
 	// Try control mode pipe first (zero subprocess)
 	if pm := GetPipeManager(); pm != nil {
 		if activities, windows, err := pm.RefreshAllActivities(); err == nil && len(activities) > 0 {
@@ -321,10 +327,6 @@ func RefreshSessionCache() {
 		// Pipe failed: log it so we can verify zero subprocess usage
 		statusLog.Debug("refresh_cache_subprocess_fallback")
 	}
-
-	// Remember which socket file the sessions were seen under, so a later mass
-	// vanish can tell a re-created socket (a steal) from sessions ending.
-	ObserveSocketIdentity(DefaultSocketName())
 
 	// Subprocess fallback: list-windows -a (3s timeout to prevent freeze when server is dead)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
