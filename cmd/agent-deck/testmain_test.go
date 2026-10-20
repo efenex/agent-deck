@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -73,7 +75,8 @@ func runTestMain(m *testing.M) int {
 	// commands operate on their temp repos instead of the real repository.
 	testutil.UnsetGitRepoEnv()
 	if !isHelperProcess {
-		isolatePackageHome("agent-deck-cmd-tests-home-*")
+		cleanupPackageHome := isolatePackageHome("agent-deck-cmd-tests-home-*")
+		defer cleanupPackageHome()
 	}
 
 	// Isolate the tmux socket. Without this, cmd-level tests spawn tmux
@@ -106,7 +109,28 @@ func runTestMain(m *testing.M) int {
 	return code
 }
 
-func isolatePackageHome(pattern string) {
+// isStrippedTmuxVar reports whether a test that scrubs the inherited
+// environment (to simulate a remote host or a bare login shell) must drop key.
+// Every TMUX* variable goes — $TMUX would route the child to the caller's
+// server — except TMUX_TMPDIR: it is the isolation itself. Dropping it sent
+// `-L <name>` sockets to the developer's real /tmp/tmux-<uid>/, where nothing
+// reaped them and each run left its stale socket files behind.
+func isStrippedTmuxVar(key string) bool {
+	return strings.HasPrefix(key, "TMUX") && key != "TMUX_TMPDIR"
+}
+
+// tmuxTmpdirEnv is the KEY=VALUE entry that keeps a hand-built child
+// environment on this binary's isolated tmux directory.
+func tmuxTmpdirEnv() string {
+	return "TMUX_TMPDIR=" + os.Getenv("TMUX_TMPDIR")
+}
+
+// isolatePackageHome points HOME at a fresh temp dir and returns its cleanup.
+// The home was never removed before: a full run left
+// one ~2 GiB home per run in $TMPDIR (208 of them, 23 GiB, on 2026-10-21),
+// because tests that shell out to `go` fill $HOME/go/pkg/mod with read-only
+// files and a plain RemoveAll fails on those.
+func isolatePackageHome(pattern string) func() {
 	home, err := os.MkdirTemp("", pattern)
 	if err != nil {
 		panic(err)
@@ -120,6 +144,29 @@ func isolatePackageHome(pattern string) {
 	os.Unsetenv("XDG_DATA_HOME")
 	os.Unsetenv("XDG_CACHE_HOME")
 	os.Unsetenv("XDG_STATE_HOME")
+	// The deferred cleanup below is skipped by a -timeout panic or a SIGKILL
+	// (cmd hit the default 10m on a loaded host), so an out-of-process watcher
+	// removes the home after this process dies by any route.
+	stopReaper := testutil.ReapHomeOnExit(home)
+	return func() {
+		removeAllWritable(home)
+		stopReaper()
+	}
+}
+
+// removeAllWritable is os.RemoveAll for a tree that may contain read-only
+// directories (the Go module cache is written 0555/0444): it restores owner
+// write permission on every directory first, as `go clean -modcache` does.
+func removeAllWritable(root string) {
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			_ = os.Chmod(path, 0o700)
+		}
+		return nil
+	})
+	if err := os.RemoveAll(root); err != nil {
+		fmt.Fprintf(os.Stderr, "remove package test home %s: %v\n", root, err)
+	}
 }
 
 // cleanupTestSessions kills any tmux sessions created during testing.

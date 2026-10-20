@@ -77,6 +77,7 @@ func IsolateTmuxSocket() func() {
 	assertIsolatedTmuxTmpdir(dir)
 	_ = os.Setenv("TMUX_TMPDIR", dir)
 	_ = os.Setenv(TestIsolationMarkerEnv, "1")
+	stopWatchdog := startTmuxDirWatchdog(dir)
 
 	return func() {
 		// KILL BEFORE REMOVE. A tmux server does not die when its socket is
@@ -127,6 +128,8 @@ func IsolateTmuxSocket() func() {
 		}
 		restoreEnv(TestIsolationMarkerEnv, origMarker, hadMarker)
 		_ = os.RemoveAll(dir)
+		// Everything the exit-path watcher exists for has now been done in-process.
+		stopWatchdog()
 	}
 }
 

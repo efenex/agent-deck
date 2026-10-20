@@ -46,7 +46,7 @@ func TestNativeSSHTUIRegistryLifecycle(t *testing.T) {
 		var out []string
 		for _, item := range os.Environ() {
 			key, _, _ := strings.Cut(item, "=")
-			if key == "HOME" || key == "TERM" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "TMUX") || strings.HasPrefix(key, "AGENTDECK_") || key == "CLAUDE_CONFIG_DIR" || key == "CODEX_HOME" {
+			if key == "HOME" || key == "TERM" || strings.HasPrefix(key, "XDG_") || isStrippedTmuxVar(key) || strings.HasPrefix(key, "AGENTDECK_") || key == "CLAUDE_CONFIG_DIR" || key == "CODEX_HOME" {
 				continue
 			}
 			out = append(out, item)
