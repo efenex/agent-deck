@@ -322,6 +322,10 @@ func RefreshSessionCache() {
 		statusLog.Debug("refresh_cache_subprocess_fallback")
 	}
 
+	// Remember which socket file the sessions were seen under, so a later mass
+	// vanish can tell a re-created socket (a steal) from sessions ending.
+	ObserveSocketIdentity(DefaultSocketName())
+
 	// Subprocess fallback: list-windows -a (3s timeout to prevent freeze when server is dead)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -2514,6 +2518,15 @@ func recoverFromStaleDefaultSocketIfNeeded(startErrOutput string) (bool, error) 
 		if isSocketAcceptingConnections(socketPath) {
 			continue
 		}
+		// A refusing socket is only stale when no live server can own it.
+		// Renaming it away from a server that is merely stalled is the socket
+		// steal by another route. See server_guard.go.
+		if servers, err := serversFor(socketPath); err != nil || len(servers) > 0 {
+			statusLog.Warn("tmux_stale_socket_quarantine_refused",
+				slog.String("socket", socketPath),
+				slog.Int("live_servers", len(servers)))
+			continue
+		}
 
 		backupPath := fmt.Sprintf("%s.stale.%d", socketPath, time.Now().UnixNano())
 		if err := os.Rename(socketPath, backupPath); err != nil {
@@ -2668,6 +2681,13 @@ func (s *Session) Start(command string) error {
 		resolvedWorkDir = home
 	}
 	workDir = resolvedWorkDir
+
+	// new-session may start a server, and tmux starts one by UNLINKING a socket
+	// that refuses connections, orphaning the live server behind it (the
+	// 2026-10-20 socket steal). Refuse instead. See server_guard.go.
+	if err := PrecheckServerStart(s.SocketName); err != nil {
+		return err
+	}
 
 	s.Command = command
 	s.invalidateCache()
@@ -3315,6 +3335,13 @@ func (s *Session) Exists() bool {
 	// this probe on Run() with nil stdio: no pipe, no copy goroutine, nothing
 	// for WaitDelay to bound on the status hot path.
 	if err != nil && socketHasProtocolMismatch(s.SocketName) {
+		return true
+	}
+	// Same for a suspect socket: refusing connections, missing while its
+	// server lives, or held by a newer server in front of the one this session
+	// lives in (the socket steal). The answer came from the wrong server, or
+	// from none.
+	if err != nil && SocketSuspect(s.SocketName) {
 		return true
 	}
 	return err == nil

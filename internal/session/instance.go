@@ -6627,6 +6627,13 @@ func (i *Instance) updateStatus(pass *StatusUpdatePass, syncMetadata bool) error
 		}
 	}
 	if !exists {
+		if i.Status != StatusError && i.Status != StatusStopped && i.tmuxSession.AbsenceVerdictHeld() {
+			// The socket is suspect (unreachable, lost, or held by a newer
+			// server in front of the one this session lives in): this absence
+			// is no verdict. Keep the last status; the tmux guard alerts once
+			// and runs recovery (2026-10-20 socket steal).
+			return nil
+		}
 		if i.tmuxSession.AbsenceIsForeignServer() {
 			// This process runs inside another tmux server and its socket-less
 			// probe followed $TMUX there; the session is alive on the default
@@ -6973,6 +6980,12 @@ func (i *Instance) updateStatus(pass *StatusUpdatePass, syncMetadata bool) error
 	i.resetHookLagLocked()
 
 	if err != nil {
+		// A live control pipe can keep Exists() true while the socket points at
+		// another server; the capture then fails. Same suspect-socket hold as
+		// the absence branch.
+		if prevStatus != StatusError && i.tmuxSession.AbsenceVerdictHeld() {
+			return nil
+		}
 		// Debounce a transient capture failure: subprocess churn can make a single
 		// CapturePane fail, then recover. Hold at running for one sample rather than
 		// firing a false error. Modeled as a derived error with no tmux raw status.
@@ -6984,6 +6997,13 @@ func (i *Instance) updateStatus(pass *StatusUpdatePass, syncMetadata bool) error
 		i.tmuxFlipFromRunningPending = false
 		i.Status = StatusError
 		return err
+	}
+
+	// GetStatus reports "inactive" when the pane cannot be captured, which on a
+	// suspect socket means "asked the wrong server", not "pane died".
+	if status == "inactive" && prevStatus != StatusError && prevStatus != StatusStopped &&
+		i.tmuxSession.AbsenceVerdictHeld() {
+		return nil
 	}
 
 	// Map tmux status to instance status
@@ -12979,6 +12999,11 @@ func (i *Instance) OpenContainerShell() (string, error) {
 	// user runs in it) paints its first frames clipped. See
 	// tmux.InitialWindowSize.
 	cols, rows := tmux.InitialWindowSize()
+	// new-session can start a server over a refusing socket; see
+	// tmux.PrecheckServerStart.
+	if err := tmux.PrecheckServerStart(i.TmuxSocketName); err != nil {
+		return "", fmt.Errorf("creating terminal session: %w", err)
+	}
 	newCtx, newCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer newCancel()
 	newCmd := tmux.ExecContext(newCtx, i.TmuxSocketName,
