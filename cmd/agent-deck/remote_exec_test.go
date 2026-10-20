@@ -40,7 +40,7 @@ func TestRemoteCommandParity(t *testing.T) {
 		cmd.Dir = home
 		for _, kv := range os.Environ() {
 			key := strings.SplitN(kv, "=", 2)[0]
-			if key == "HOME" || key == "PATH" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || strings.HasPrefix(key, "TMUX") {
+			if key == "HOME" || key == "PATH" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || isStrippedTmuxVar(key) {
 				continue
 			}
 			cmd.Env = append(cmd.Env, kv)
@@ -172,7 +172,7 @@ func TestRemoteCommandParity(t *testing.T) {
 		}
 		tmuxName, _ := state["tmux_session"].(string)
 		probeCmd := exec.Command("tmux", "-L", socket, "has-session", "-t", tmuxName)
-		probeCmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + remote}
+		probeCmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + remote, tmuxTmpdirEnv()}
 		probe := probeCmd.Run()
 		if (probe == nil) != (command != "stop") {
 			t.Fatalf("remote %s tmux state mismatch: %v, show %s", command, probe, show)

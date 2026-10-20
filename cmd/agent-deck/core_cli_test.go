@@ -326,7 +326,11 @@ func shortTempDir(t *testing.T, prefix string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	stopReaper := testutil.ReapTmuxDirOnExit(dir)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+		stopReaper()
+	})
 	return dir
 }
 

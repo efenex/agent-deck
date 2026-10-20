@@ -100,7 +100,7 @@ func startParitySSH(t *testing.T, remoteHome, binDir string) {
 							cmd.Dir = remoteHome
 							for _, kv := range os.Environ() {
 								key := strings.SplitN(kv, "=", 2)[0]
-								if key == "PATH" || key == "HOME" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || strings.HasPrefix(key, "TMUX") {
+								if key == "PATH" || key == "HOME" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || isStrippedTmuxVar(key) {
 									continue
 								}
 								cmd.Env = append(cmd.Env, kv)

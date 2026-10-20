@@ -95,7 +95,7 @@ while True:
 		var env []string
 		for _, kv := range os.Environ() {
 			key := strings.SplitN(kv, "=", 2)[0]
-			if key == "HOME" || key == "PATH" || key == "TERM" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || strings.HasPrefix(key, "TMUX") {
+			if key == "HOME" || key == "PATH" || key == "TERM" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || isStrippedTmuxVar(key) {
 				continue
 			}
 			env = append(env, kv)
@@ -141,7 +141,7 @@ while True:
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, "tmux", args...)
-		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + remote}
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + remote, tmuxTmpdirEnv()}
 		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("tmux probe: %v", err)
@@ -305,7 +305,7 @@ while True:
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, "tmux", args...)
-		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + remote}
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + remote, tmuxTmpdirEnv()}
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("grid capture: %v: %s", err, output)

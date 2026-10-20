@@ -78,7 +78,7 @@ while True:
 		cmd.Dir = home
 		for _, kv := range os.Environ() {
 			key := strings.SplitN(kv, "=", 2)[0]
-			if key == "HOME" || key == "PATH" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || strings.HasPrefix(key, "TMUX") {
+			if key == "HOME" || key == "PATH" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || isStrippedTmuxVar(key) {
 				continue
 			}
 			cmd.Env = append(cmd.Env, kv)
@@ -152,7 +152,7 @@ while True:
 		state := decode(must(side, "", "session", "show", title, "--json")).(map[string]any)
 		name, _ := state["tmux_session"].(string)
 		cmd := exec.Command("tmux", "-L", sockets[side], "has-session", "-t", name)
-		cmd.Env = []string{"HOME=" + homes[side], "PATH=" + os.Getenv("PATH")}
+		cmd.Env = []string{"HOME=" + homes[side], "PATH=" + os.Getenv("PATH"), tmuxTmpdirEnv()}
 		return cmd.Run() == nil
 	}
 	for side := range homes {

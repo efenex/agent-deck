@@ -53,7 +53,7 @@ while True:
 	var env []string
 	for _, kv := range os.Environ() {
 		key := strings.SplitN(kv, "=", 2)[0]
-		if key == "HOME" || key == "TERM" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || strings.HasPrefix(key, "TMUX") {
+		if key == "HOME" || key == "TERM" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || isStrippedTmuxVar(key) {
 			continue
 		}
 		env = append(env, kv)
@@ -75,7 +75,7 @@ while True:
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, "tmux", append([]string{"-L", socket}, args...)...)
-		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, tmuxTmpdirEnv()}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("tmux %v: %v %s", args, err, out)
