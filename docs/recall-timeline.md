@@ -116,6 +116,7 @@ Row:
 | `is_error` | Tool result was an error or a non-zero exit |
 | `queued` | `true` while a message typed during a turn waits; `false` once absorbed |
 | `origin` | Who put a user-side row into the conversation: `human`, `peer:<from-id>`, `hook`, `task-notification` or `system`. Absent on assistant and tool rows. See [Origin](#origin) |
+| `seg` | The native conversation id the row belongs to. Only with `--chain` ([Across `/clear`](#across-clear)) |
 | `meta` | `tool_name`, `user_shell`, `path`, `input` (todo list, question options, edit arguments, Codex changes), `lines`, `exit_code`, `added`/`removed`, `answers`, `agent_id`, `status`, `duration_ms`, `pre_tokens`/`post_tokens`, `tokens`, `images`, `delivery` (`queued`/`absorbed`), `model`, `raw` (only on `other`) |
 | `children` | Sub-agent sidechain rows under a `subagent` row (`<session>/subagents/agent-<id>.jsonl`), ids prefixed `sub:<agent id>:` |
 | `raw_type` | The native record type (`assistant`, `system/turn_duration`, `item_completed/CommandExecution`, …) |
@@ -151,6 +152,53 @@ false until the output record lands, and the output arrives as an `update`
 (`body`, `finished`, `is_error` when only stderr was written). The id is the
 `<bash-input>` record's uuid. When only the output record is in view it is a
 finished `bash` row of its own.
+
+### Across `/clear`
+
+`/clear` and `/new` start a new native conversation under the same deck
+session. agent-deck keeps all of them in `session_links`:
+
+```sh
+agent-deck recall chain <session> --json
+```
+
+```json
+{"schema": "agent-deck.recall.chain/v1",
+ "session": {"id": "f8593170-1792258124", "title": "tower", "harness": "claude"},
+ "current": "4cce9561-...",
+ "segments": [{"seq": 0, "native_id": "17295b8f-...", "harness": "claude",
+               "first_seen": 1792258263, "last_seen": 1792337594,
+               "first_seen_at": "2026-10-17T17:31:03Z", "last_seen_at": "2026-10-18T15:33:14Z",
+               "current": false, "authoritative": false, "path": "/.../17295b8f-....jsonl"}]}
+```
+
+Segments run oldest first (`first_seen`, then `last_seen`, then id); the live
+conversation is always last, even when a resume moved the session back to an
+older id. `first_seen`/`last_seen` are unix seconds from `session_links`;
+`path` is the transcript on this host and is left out when it is not here. A
+session with no recorded links answers with its current conversation id. The
+verb reads state.db only, so it works with `[recall] enabled = false`.
+`<session>` may be an id the session held earlier.
+
+`recall timeline <session> --json --chain` pages across those conversations
+with the same row contract:
+
+- `--tail N` fills from the newest conversation backwards until N rows;
+  `--before <cursor> --limit N` continues. Every row carries `seg`.
+- A conversation after the first starts with a `boundary:<native id>` row
+  (`kind: "system"`, `raw_type: "chain/boundary"`, `title: "Conversation
+  cleared"`, `meta: {boundary: "clear", seg, prev_seg}`), so a client that does
+  not know chains still shows a line there. Boundary rows are not counted
+  against `N`.
+- A page that uses a conversation up carries on into the previous one.
+  `before_cursor` is an ordinary row cursor, and it is empty at the start of
+  the chain. The cursor `seg:<native id>` is also accepted by `--before` and
+  starts at the tail of that conversation.
+- `through_cursor` belongs to the newest conversation read; `follow` stays on
+  the current conversation, and `--chain` cannot be combined with `--since`,
+  `--agent`, `--v1` or `--transcript`. Conversations whose transcript is not on
+  this host are skipped.
+- Claude and Codex only.
 
 Claude Code mapping: `queue-operation enqueue` is a `user` row with
 `queued: true`; `remove` with `reason: absorbed_mid_turn` is an update with

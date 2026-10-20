@@ -6,6 +6,8 @@ The controller forwards these read commands to the configured owner host:
 agent-deck remote HOST recall timeline ID --json --tail 100
 agent-deck remote HOST recall timeline ID --json --since CURSOR
 agent-deck remote HOST recall timeline ID --json --before BEFORE_CURSOR --limit 100
+agent-deck remote HOST recall timeline ID --json --chain --tail 100
+agent-deck remote HOST recall chain ID --json
 agent-deck remote HOST recall follow ID --after CURSOR --jsonl --status
 agent-deck remote HOST events follow --jsonl --since 123
 agent-deck remote HOST session send-status SEND_ID --json
