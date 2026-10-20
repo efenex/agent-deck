@@ -115,9 +115,42 @@ Row:
 | `finished` | Tool rows: false until the result lands |
 | `is_error` | Tool result was an error or a non-zero exit |
 | `queued` | `true` while a message typed during a turn waits; `false` once absorbed |
-| `meta` | `tool_name`, `path`, `input` (todo list, question options, edit arguments, Codex changes), `lines`, `exit_code`, `added`/`removed`, `answers`, `agent_id`, `status`, `duration_ms`, `pre_tokens`/`post_tokens`, `tokens`, `images`, `delivery` (`queued`/`absorbed`), `model`, `raw` (only on `other`) |
+| `origin` | Who put a user-side row into the conversation: `human`, `peer:<from-id>`, `hook`, `task-notification` or `system`. Absent on assistant and tool rows. See [Origin](#origin) |
+| `meta` | `tool_name`, `user_shell`, `path`, `input` (todo list, question options, edit arguments, Codex changes), `lines`, `exit_code`, `added`/`removed`, `answers`, `agent_id`, `status`, `duration_ms`, `pre_tokens`/`post_tokens`, `tokens`, `images`, `delivery` (`queued`/`absorbed`), `model`, `raw` (only on `other`) |
 | `children` | Sub-agent sidechain rows under a `subagent` row (`<session>/subagents/agent-<id>.jsonl`), ids prefixed `sub:<agent id>:` |
 | `raw_type` | The native record type (`assistant`, `system/turn_duration`, `item_completed/CommandExecution`, …) |
+
+### Origin
+
+`origin` says who produced a row that is not the assistant's. It is set on
+`user`, `command`, `system` and `bash` rows that come from user records,
+queue operations, `queued_command` attachments and hook output, and left out
+elsewhere.
+
+| Value | Meaning |
+| --- | --- |
+| `human` | Typed at the terminal, a slash command, or a `!` shell line |
+| `peer:<from-id>` | Another session: agent-deck's `[agent-deck from:<id>]` tag (also inside a `<pasted_content>` wrapper or after Claude's "Another Claude session sent a message:" line), Claude Code's `<agent-message from="<id>">` envelope, or Claude's own `origin.kind: "peer"` (`peer:unknown` when it names no sender) |
+| `hook` | `Stop hook feedback:`, `[INBOX]`, hook output attachments, `stop_hook_summary` |
+| `task-notification` | A background task or monitor reporting back |
+| `system` | Other injected context: skill bodies, local-command caveats, reminders, compaction summaries |
+
+Order of evidence: the peer tag in the text first (a peer's send arrives as a
+human-typed message, so Claude's own `origin` calls it `human`), then Claude
+Code's `origin` object on the record, then the text and flags for transcripts
+written before Claude recorded one. A peer message keeps its `kind` (`user`
+when typed in, `system` when delivered as a `queued_command`); use `origin` to
+tell them apart. Codex user rows get `human` or the peer tag. Pi, Gemini,
+OpenCode and Hermes rows built from v1 turns do the same on `user` turns.
+
+### User shell lines
+
+A `!` line is a `bash` row with `meta.user_shell: true` and `origin: "human"`,
+the same shape as the Bash tool's row: `detail` is the command, `finished` is
+false until the output record lands, and the output arrives as an `update`
+(`body`, `finished`, `is_error` when only stderr was written). The id is the
+`<bash-input>` record's uuid. When only the output record is in view it is a
+finished `bash` row of its own.
 
 Claude Code mapping: `queue-operation enqueue` is a `user` row with
 `queued: true`; `remove` with `reason: absorbed_mid_turn` is an update with
