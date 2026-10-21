@@ -249,6 +249,13 @@ func sendTransportFromConfig() (value string, warn string) {
 	return cfg.GetSendTransport(), ""
 }
 
+// validSendTransportFlag reports whether a `session send --transport` value
+// is accepted: empty (use config.toml), "tmux" or "auto". Anything else is a
+// usage error rather than a silent tmux, so a typo never changes transports.
+func validSendTransportFlag(v string) bool {
+	return v == "" || v == "tmux" || v == "auto"
+}
+
 // sendTargetLockWait bounds how long a send waits for another send to finish
 // with the same target (session.SendTargetLockWait; a var so tests can shorten
 // it). A stuck holder surfaces as deliveryTargetBusy.

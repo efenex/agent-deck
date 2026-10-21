@@ -31,6 +31,9 @@ type Send struct {
 	Message            string
 	Images             []string
 	RequireInputPrompt bool
+	// Transport is the send's --transport override ("tmux" or "auto"); empty
+	// means the delivering child reads send_transport from config.
+	Transport string
 	// Sender is who queued the send: the calling session's id, or "cli".
 	Sender string
 	// Deadline ends the wait for a busy target; zero means no deadline.
@@ -126,8 +129,8 @@ func newRecord(dir string, s Send, now time.Time) (*Record, error) {
 	rec := &Record{
 		SendID: id, State: StateQueued, Verdict: "queued", TargetStatus: "unknown",
 		SessionID: s.SessionID, SessionTitle: s.SessionTitle, Tool: s.Tool, Message: s.Message, Images: s.Images,
-		RequireInputPrompt: s.RequireInputPrompt,
-		CreatedAt:          now.UTC().Format(time.RFC3339Nano), UpdatedAt: now.UTC().Format(time.RFC3339Nano),
+		RequireInputPrompt: s.RequireInputPrompt, Transport: s.Transport,
+		CreatedAt: now.UTC().Format(time.RFC3339Nano), UpdatedAt: now.UTC().Format(time.RFC3339Nano),
 		Sender:          s.Sender,
 		ClaudeSessionID: s.ClaudeSessionID,
 		Key:             s.Key, WaitWhileStopped: s.WaitWhileStopped,

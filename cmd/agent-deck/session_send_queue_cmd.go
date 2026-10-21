@@ -154,14 +154,14 @@ func ledgerQueuedSend(r *sendqueue.Record, inboxOwned bool) {
 
 // queueSend records the send and hands it to the target's worker. It never
 // types anything itself; it returns at once.
-func queueSend(profile string, storage *session.Storage, inst *session.Instance, message string, images []string, tagged bool, ledgerSender string, requireInputPrompt, ignoreBudget bool, out *CLIOutput) {
+func queueSend(profile string, storage *session.Storage, inst *session.Instance, message string, images []string, tagged bool, ledgerSender string, requireInputPrompt, ignoreBudget bool, transport string, out *CLIOutput) {
 	now := time.Now()
 	status := "unknown"
 	s := sendqueue.Send{
 		SessionID: inst.ID, SessionTitle: inst.Title, Tool: inst.Tool, Running: inst.Exists(),
 		Message: message, Images: images, RequireInputPrompt: requireInputPrompt,
 		Sender: ledgerSender, Deadline: now.Add(sendqueue.DefaultRetryBudget), Ledger: ledgerSendAllowed(),
-		IgnoreBudget: ignoreBudget,
+		IgnoreBudget: ignoreBudget, Transport: transport,
 	}
 	if s.Sender == "" {
 		s.Sender = sendSenderCLI
@@ -775,6 +775,17 @@ func typeQueued(profile, dir string, rec *sendqueue.Record, inst *session.Instan
 	} else if rec.RequireInputPrompt {
 		child = sendChildGuarded
 	}
+	if rec.Transport != "" {
+		// The child must keep the queued send's --transport pin; the
+		// release/guarded choice above carries over as options.
+		opts := childSendOptions{requireInputPrompt: rec.RequireInputPrompt || status == queueReleaseStatus, transport: rec.Transport}
+		if status == queueReleaseStatus {
+			opts.noWait = releaseChildOptions.noWait
+		}
+		child = func(profile, id, message, resultPath string) (int, func() int, error) {
+			return sendChildWithOptions(profile, id, message, resultPath, opts)
+		}
+	}
 	pid, wait, err := child(profile, rec.SessionID, rec.Message, result)
 	if err != nil {
 		// The child never started, so nothing was typed.
@@ -1041,9 +1052,14 @@ func startChildSend(profile, id, message, resultPath string) (int, func() int, e
 
 // childSendOptions are the extra `session send` flags a queue child carries.
 type childSendOptions struct {
-	requireInputPrompt bool // --require-input-prompt: refuse untyped without an input prompt
-	noWait             bool // --no-wait: skip the readiness wait
+	requireInputPrompt bool   // --require-input-prompt: refuse untyped without an input prompt
+	noWait             bool   // --no-wait: skip the readiness wait
+	transport          string // --transport: the queued send's transport pin
 }
+
+// sendChildWithOptions starts a queue child with explicit options (a
+// --transport pin); a var so tests can stub it.
+var sendChildWithOptions = startChildSendWithOptions
 
 // releaseChildOptions: `session queue release` forces the guarded send and
 // skips the readiness wait, as in the lab core.
@@ -1057,6 +1073,9 @@ func childSendArgs(profile, id, msgPath string, opts childSendOptions) []string 
 	}
 	if opts.noWait {
 		args = append(args, "--no-wait")
+	}
+	if opts.transport != "" {
+		args = append(args, "--transport", opts.transport)
 	}
 	return args
 }

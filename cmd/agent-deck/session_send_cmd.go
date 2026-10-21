@@ -103,6 +103,7 @@ func handleSessionSend(profile string, args []string) {
 	ignoreBudget := fs.Bool("ignore-budget", false, ignoreBudgetFlagHelp)
 	noTag := fs.Bool("no-tag", false, "Do not prefix the [agent-deck from:<id>] envelope a send from inside a session gets by default ([send] tag_sends)")
 	requireInputPrompt := fs.Bool("require-input-prompt", false, "Refuse with menu_open unless an input prompt is visible immediately before each keystroke batch")
+	transportFlag := fs.String("transport", "", "Override send_transport from config.toml for this send: tmux (type into the pane) or auto (Claude messaging socket when available, else tmux)")
 	sourceFlag := fs.String("source", "", sendSourceFlagHelp)
 	var images imageList
 	fs.Var(&images, "image", "Attach an image (repeatable): Claude Code and Gemini get @<copy under .agentdeck-images/>; Codex and other harnesses exit 2")
@@ -119,6 +120,7 @@ func handleSessionSend(profile string, args []string) {
 		fmt.Println("tmux, since Claude's socket path renders slash commands as literal text.")
 		fmt.Println("SSH-backed (remote) targets always use tmux too: the messaging socket must")
 		fmt.Println("be dialed on the machine that owns it.")
+		fmt.Println("--transport tmux|auto overrides send_transport for one send (queued sends keep it).")
 		fmt.Println()
 		fmt.Println("Options:")
 		fs.PrintDefaults()
@@ -187,6 +189,11 @@ func handleSessionSend(profile string, args []string) {
 	if *deferIfBusy && *noWait {
 		out.Error("--defer-if-busy is incompatible with --no-wait", ErrCodeInvalidOperation)
 		exitCLI(1)
+	}
+
+	if !validSendTransportFlag(*transportFlag) {
+		out.Error(fmt.Sprintf("--transport must be tmux or auto, got %q", *transportFlag), ErrCodeInvalidOperation)
+		exitCLI(2)
 	}
 
 	sessionRef := remaining[0]
@@ -313,7 +320,7 @@ func handleSessionSend(profile string, args []string) {
 			if *noTag {
 				ledgerSender = "" // --no-tag: never attributed to an inherited session
 			}
-			queueSend(profile, storage, inst, message, copies, tagged, ledgerSender, *requireInputPrompt, *ignoreBudget, out) // exits on failure
+			queueSend(profile, storage, inst, message, copies, tagged, ledgerSender, *requireInputPrompt, *ignoreBudget, *transportFlag, out) // exits on failure
 			recordSent()
 			fire.record(triggers.OutcomeQueued)
 			return
@@ -576,6 +583,11 @@ func handleSessionSend(profile string, args []string) {
 	// strictly before any byte is written, so falling back to tmux here is
 	// indistinguishable from today's behavior on any resolution failure.
 	sendTransportValue, sendTransportWarn := sendTransportFromConfig()
+	if *transportFlag != "" {
+		// --transport: this send's own pin wins over config.toml (and its
+		// load warnings, which no longer decide anything).
+		sendTransportValue, sendTransportWarn = *transportFlag, ""
+	}
 	if sendTransportWarn != "" {
 		fmt.Fprintln(os.Stderr, sendTransportWarn)
 	}
