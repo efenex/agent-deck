@@ -87,6 +87,8 @@ type Record struct {
 	// Redeliveries counts explicit failed-to-queued reopens; Attempts is never reset.
 	Redeliveries int    `json:"redeliveries,omitempty"`
 	SentAt       string `json:"sent_at,omitempty"`
+	// Transport is the per-call override; empty uses send_transport from config.
+	Transport string `json:"transport,omitempty"`
 	// Sender is who queued the send: the calling session's id, or "cli".
 	// The delivering child journals it as the send's sender.
 	Sender string `json:"sender,omitempty"`
