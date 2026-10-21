@@ -23,8 +23,12 @@ func TestTmuxWatchdogHelper(t *testing.T) {
 	if mode == "" {
 		return
 	}
-	if mode == "home" {
-		home, err := os.MkdirTemp("", "agent-deck-cmd-tests-home-")
+	if mode == "home" || mode == "ad-home" {
+		pattern := "agent-deck-cmd-tests-home-"
+		if mode == "ad-home" {
+			pattern = "ad-home-"
+		}
+		home, err := os.MkdirTemp("", pattern)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +82,11 @@ func runWatchdogHelper(t *testing.T, mode string) (dir string, helper *exec.Cmd)
 		t.Fatalf("helper reported no isolated dir: %v", err)
 	}
 	dir = strings.TrimSpace(line)
-	if want := map[bool]string{true: "agent-deck-cmd-tests-home-", false: "ad-tmux-"}[mode == "home"]; !strings.HasPrefix(filepath.Base(dir), want) {
+	want := map[string]string{"home": "agent-deck-cmd-tests-home-", "ad-home": "ad-home-"}[mode]
+	if want == "" {
+		want = "ad-tmux-"
+	}
+	if !strings.HasPrefix(filepath.Base(dir), want) {
 		t.Fatalf("helper isolated dir = %q, want a %s* dir", dir, want)
 	}
 	// Safety net: never leave the server behind even if an assertion fails.
@@ -124,6 +132,12 @@ func TestTmuxWatchdog_RemovesDirWhenOwnerHadNoTmuxOrShOnPATH(t *testing.T) {
 
 func TestReapHomeOnExit_RemovesReadOnlyHomeWhenOwnerOsExits(t *testing.T) {
 	dir, helper := runWatchdogHelper(t, "home")
+	_ = helper.Wait()
+	requireDirGone(t, dir)
+}
+
+func TestReapHomeOnExit_RemovesIsolateHomePrefix(t *testing.T) {
+	dir, helper := runWatchdogHelper(t, "ad-home")
 	_ = helper.Wait()
 	requireDirGone(t, dir)
 }

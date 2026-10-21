@@ -45,10 +45,14 @@ func startTmuxDirWatchdog(dir string) (stop func()) {
 // ReapHomeOnExit is the same guard for a package's isolated HOME: the directory
 // is removed (writable again first, since a go module cache is read-only) after
 // this process dies by any route. dir's base name must start with
-// "agent-deck-cmd-tests-home-". The returned stop func ends the watcher once the
-// in-process cleanup has run.
+// "agent-deck-cmd-tests-home-" (cmd's package home) or "ad-home-" (IsolateHome).
+// The returned stop func ends the watcher once the in-process cleanup has run.
 func ReapHomeOnExit(dir string) (stop func()) {
-	return startDirWatchdog(dir, "agent-deck-cmd-tests-home-", false)
+	prefix := "agent-deck-cmd-tests-home-"
+	if strings.HasPrefix(filepath.Base(dir), "ad-home-") {
+		prefix = "ad-home-"
+	}
+	return startDirWatchdog(dir, prefix, false)
 }
 
 // ReapTmuxDirOnExit guards a test's own short TMUX_TMPDIR (a "ad*" directory
