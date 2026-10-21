@@ -3,10 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -149,23 +147,8 @@ func isolatePackageHome(pattern string) func() {
 	// removes the home after this process dies by any route.
 	stopReaper := testutil.ReapHomeOnExit(home)
 	return func() {
-		removeAllWritable(home)
+		testutil.RemoveAllWritable(home)
 		stopReaper()
-	}
-}
-
-// removeAllWritable is os.RemoveAll for a tree that may contain read-only
-// directories (the Go module cache is written 0555/0444): it restores owner
-// write permission on every directory first, as `go clean -modcache` does.
-func removeAllWritable(root string) {
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err == nil && d.IsDir() {
-			_ = os.Chmod(path, 0o700)
-		}
-		return nil
-	})
-	if err := os.RemoveAll(root); err != nil {
-		fmt.Fprintf(os.Stderr, "remove package test home %s: %v\n", root, err)
 	}
 }
 

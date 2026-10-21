@@ -1,8 +1,15 @@
 package testutil
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/asheshgoplani/agent-deck/internal/sandboxguard"
 )
@@ -87,6 +94,17 @@ var ToolConfigDirEnvs = sandboxguard.ToolConfigDirEnvs
 //
 // Returns a cleanup function that removes the temp dir and restores the
 // original env so the parent process is not permanently altered.
+//
+// WHY THE GO CACHES ARE PINNED AND THE CLEANUP CHMODS (2026-10-21 ~2 GiB/run
+// leak): any test that shells out to `go` with HOME=<ad-home-*> would fill
+// $HOME/go/pkg/mod there. The module cache is written 0555/0444, so a plain
+// os.RemoveAll fails and every full run stranded ~28 such dirs (~2 GiB). The
+// fix is layered: GOMODCACHE/GOCACHE keep resolving to the developer's real
+// caches (resolved before HOME moves), GOFLAGS gains -modcacherw so anything
+// that does land in the sandbox stays removable, the cleanup restores owner
+// write bits before removing, and an out-of-process watcher (see
+// ReapHomeOnExit) removes the dir when this process dies without running the
+// cleanup (-timeout panic, SIGKILL, goleak's os.Exit).
 func IsolateHome() func() {
 	type snap struct {
 		key string
@@ -102,6 +120,9 @@ func IsolateHome() func() {
 		"XDG_STATE_HOME",
 		"AGENTDECK_PROFILE",
 		HomeIsolationMarkerEnv,
+		"GOMODCACHE",
+		"GOCACHE",
+		"GOFLAGS",
 	}
 	keys = append(keys, ToolConfigDirEnvs...)
 
@@ -119,6 +140,10 @@ func IsolateHome() func() {
 		_ = os.MkdirAll(dir, 0o700)
 	}
 
+	// Resolve the Go caches against the REAL home before HOME moves; afterwards
+	// `go` would default them to <ad-home>/go/pkg/mod and <ad-home>/Library/....
+	pinGoCaches()
+
 	_ = os.Setenv("HOME", dir)
 	// Clear (do NOT pin) the XDG base dirs so they fall back to $HOME/*. This
 	// keeps the per-package shared HOME from accumulating stale XDG config/data
@@ -134,10 +159,52 @@ func IsolateHome() func() {
 	_ = os.Setenv("AGENTDECK_PROFILE", "_test")
 	_ = os.Setenv(HomeIsolationMarkerEnv, "1")
 
+	stopReaper := ReapHomeOnExit(dir)
 	return func() {
 		for _, s := range snaps {
 			restoreEnv(s.key, s.val, s.had)
 		}
-		_ = os.RemoveAll(dir)
+		RemoveAllWritable(dir)
+		stopReaper()
+	}
+}
+
+// pinGoCaches exports GOMODCACHE and GOCACHE as the toolchain resolves them for
+// the current (real) HOME, unless the caller already set them, and adds
+// -modcacherw to GOFLAGS. Best effort: without a usable `go` the -modcacherw
+// flag and the writable-chmod cleanup still keep the sandbox removable.
+func pinGoCaches() {
+	if os.Getenv("GOMODCACHE") == "" || os.Getenv("GOCACHE") == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "go", "env", "-json", "GOMODCACHE", "GOCACHE")
+		cmd.WaitDelay = time.Second
+		var caches map[string]string
+		if out, err := cmd.Output(); err == nil && json.Unmarshal(out, &caches) == nil {
+			for _, key := range []string{"GOMODCACHE", "GOCACHE"} {
+				if os.Getenv(key) == "" && filepath.IsAbs(caches[key]) {
+					_ = os.Setenv(key, caches[key])
+				}
+			}
+		}
+	}
+	flags := os.Getenv("GOFLAGS")
+	if !strings.Contains(flags, "-modcacherw") {
+		_ = os.Setenv("GOFLAGS", strings.TrimSpace(flags+" -modcacherw"))
+	}
+}
+
+// RemoveAllWritable is os.RemoveAll for a tree that may contain read-only
+// directories (the Go module cache is written 0555/0444): it restores owner
+// write permission on every directory first, as `go clean -modcache` does.
+func RemoveAllWritable(root string) {
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			_ = os.Chmod(path, 0o700)
+		}
+		return nil
+	})
+	if err := os.RemoveAll(root); err != nil {
+		fmt.Fprintf(os.Stderr, "remove test home %s: %v\n", root, err)
 	}
 }
