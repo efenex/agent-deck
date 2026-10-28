@@ -18,6 +18,10 @@ Tests: `internal/recall/query/origin_test.go` (derivation table, all record shap
 
 Run in the cloud sandbox (no docker): `go build ./...` OK; `go test ./internal/recall/...` passes (sandboxed HOME). The container run (`FULL_TESTS=1`) is **still owed** (operator, laptop).
 
+**Diff size:** +619/-10, over the ~400-line guideline: about 390 lines are tests and goldens, and the production change is one new file (`origin.go`, 143 lines) plus a small edit to `rows.go`.
+
+**Self-check (cloud sandbox, base upstream/main):** gofmt, go vet, go build, test-added, no-changelog and the body gates pass; the sandboxed-tests and revert-check steps did not run (no container).
+
 ## AI disclosure
 
 - [ ] Human-written
