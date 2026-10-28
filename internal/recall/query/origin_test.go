@@ -305,3 +305,38 @@ func TestRowsUserShellThroughFollow(t *testing.T) {
 		t.Fatalf("--since after the output record: turns=%d updates=%+v", len(next.Turns), next.Updates)
 	}
 }
+
+func TestBashShellOutput(t *testing.T) {
+	for _, c := range []struct {
+		name, text, want string
+		isErr            bool
+	}{
+		{"stdout only", "<bash-stdout>a &amp; b</bash-stdout><bash-stderr></bash-stderr>", "a & b", false},
+		{"stderr only is an error", "<bash-stdout></bash-stdout><bash-stderr>boom</bash-stderr>", "boom", true},
+		{"both streams join, not an error", "<bash-stdout>out\n</bash-stdout><bash-stderr>warn</bash-stderr>", "out\nwarn", false},
+		{"escaped markup in stderr", "<bash-stderr>&lt;x&gt;</bash-stderr>", "<x>", true},
+	} {
+		got, isErr := bashShellOutput(c.text)
+		if got != c.want || isErr != c.isErr {
+			t.Errorf("%s: bashShellOutput = (%q, %v), want (%q, %v)", c.name, got, isErr, c.want, c.isErr)
+		}
+	}
+}
+
+func TestDeriveOriginPrecedence(t *testing.T) {
+	human := nativeOrigin{Kind: "human"}
+	for _, c := range []struct {
+		name, kind, text string
+		meta             bool
+		no               nativeOrigin
+		want             string
+	}{
+		{"native human beats stop-hook text", "user", "Stop hook feedback:\nx", false, human, "human"},
+		{"agent-message envelope beats native task-notification", "system", `<agent-message from="a9">x`, true, nativeOrigin{Kind: "task-notification"}, "peer:a9"},
+		{"bash kind without native origin is human", "bash", "<bash-input>ls</bash-input>", false, nativeOrigin{}, "human"},
+	} {
+		if got := deriveOrigin(c.kind, c.text, c.meta, c.no); got != c.want {
+			t.Errorf("%s: deriveOrigin = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
