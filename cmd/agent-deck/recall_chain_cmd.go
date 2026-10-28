@@ -126,6 +126,7 @@ func handleRecallChain(profile string, args []string) {
 		fmt.Fprintln(fs.Output(), "Usage: agent-deck recall chain <session> --json")
 		fmt.Fprintln(fs.Output(), "The native conversations a deck session has been, oldest first: /clear and /new start a new one under the same session.")
 		fmt.Fprintln(fs.Output(), "<session>: deck session id, title or id prefix, or a conversation id the session ever held. Works with [recall] off.")
+		fmt.Fprintln(fs.Output(), "Output: {schema, session, current, segments[]}; each segment has native_id, first_seen/last_seen (unix and RFC3339), current, authoritative and path (only when the transcript is on this host). The live conversation is last. Read-only; reads state.db only.")
 		fmt.Fprintln(fs.Output(), "Page rows across the chain with: agent-deck recall timeline <session> --json --chain --tail N")
 		fs.PrintDefaults()
 	}
