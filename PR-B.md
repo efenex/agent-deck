@@ -21,7 +21,7 @@ Tests: `internal/recall/query/chain_test.go` (tail fill, before walk, spill, emp
 
 Run in the cloud sandbox (no docker), on top of upstream main: `go build ./...` OK; `go vet` clean; `go test ./internal/recall/... ./internal/statedb/...` pass; `go test ./cmd/agent-deck -run 'Chain|Golden|Help|RecallTimeline|RecallRows|RecallRemote'` passes. A wider `-run Remote` also matched the unrelated remote-sweep tests, which failed here (they depend on hosts/tmux); not investigated. The container `FULL_TESTS=1` run is **still owed** (operator, laptop).
 
-**Diff size:** about +1000 lines, over the ~400-line guideline; roughly half is tests, docs and goldens. It is one feature (the verb and the flag share the chain reader).
+**Diff size:** about +1060/-45 on top of the stacked PR (self-check against main shows +1682/-48 because it includes that one), over the ~400-line guideline; roughly half is tests, docs and goldens. It is one feature (the verb and the flag share the chain reader).
 
 ## AI disclosure
 
