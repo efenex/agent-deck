@@ -1,0 +1,7 @@
+Usage: agent-deck recall chain <session> --json
+The native conversations a deck session has been, oldest first: /clear and /new start a new one under the same session.
+<session>: deck session id, title or id prefix, or a conversation id the session ever held. Works with [recall] off.
+Output: {schema, session, current, segments[]}; each segment has native_id, first_seen/last_seen (unix and RFC3339), current, authoritative and path (only when the transcript is on this host). The live conversation is last. Read-only; reads state.db only.
+Page rows across the chain with: agent-deck recall timeline <session> --json --chain --tail N
+  -json
+    	Output canonical JSON

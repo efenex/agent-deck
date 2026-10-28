@@ -45,6 +45,7 @@ var appHelpProbes = [][]string{
 	{"remote", "help"},
 	{"recall", "timeline", "--help"},
 	{"recall", "follow", "--help"},
+	{"recall", "chain", "--help"},
 	{"events", "--help"},
 	{"events", "help"},
 	{"events", "follow", "--help"},
