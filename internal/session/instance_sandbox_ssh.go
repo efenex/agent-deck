@@ -65,6 +65,11 @@ func (i *Instance) OpenContainerShell() (string, error) {
 	// user runs in it) paints its first frames clipped. See
 	// tmux.InitialWindowSize.
 	cols, rows := tmux.InitialWindowSize()
+	// new-session can start a server over a refusing socket; see
+	// tmux.PrecheckServerStart.
+	if err := tmux.PrecheckServerStart(i.TmuxSocketName); err != nil {
+		return "", fmt.Errorf("creating terminal session: %w", err)
+	}
 	newCtx, newCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer newCancel()
 	newCmd := tmux.ExecContext(newCtx, i.TmuxSocketName,

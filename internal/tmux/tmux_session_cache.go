@@ -93,6 +93,12 @@ func RefreshSessionCache() {
 	finish := logging.TraceOp(perfLog, "refresh_session_cache", 100*time.Millisecond)
 	defer finish()
 
+	// Remember which socket file the sessions were seen under, so a later mass
+	// vanish can tell a replaced socket (a steal) from sessions ending. Before
+	// the pipe path, which returns early: its control connection survives the
+	// socket being replaced. One stat per tick.
+	ObserveSocketIdentity(DefaultSocketName())
+
 	// Try control mode pipe first (zero subprocess)
 	if pm := GetPipeManager(); pm != nil {
 		if activities, windows, err := pm.RefreshAllActivities(); err == nil && len(activities) > 0 {
