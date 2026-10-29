@@ -242,6 +242,27 @@ func (nt *Notifier) Notify(n Notification) string {
 	return ""
 }
 
+// NotifyText delivers a free-form title/body through the first available
+// backend, for operator alerts that are not a session transition (the tmux
+// socket guard). Same best-effort contract as Notify.
+func (nt *Notifier) NotifyText(title, body string) string {
+	if nt == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dispatchTimeout)
+	defer cancel()
+	for _, b := range nt.backends {
+		if b == nil || !b.Available() {
+			continue
+		}
+		if err := b.Notify(ctx, title, body); err != nil {
+			continue
+		}
+		return b.Name()
+	}
+	return ""
+}
+
 // ShouldNotify reports whether a status merits interrupting the operator.
 //
 // Deliberately narrower than the set the parent-routing path uses. "idle" is

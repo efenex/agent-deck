@@ -2317,6 +2317,16 @@ func (i *Instance) updateStatus(pass *StatusUpdatePass, syncMetadata bool) error
 		}
 	}
 	if !exists {
+		if i.Status != StatusError && i.Status != StatusStopped && !i.neverStarted() &&
+			i.tmuxSession.AbsenceVerdictHeld() {
+			// A row last seen live, and the socket is suspect (refusing or
+			// missing while the server bound to it lives, or replaced right
+			// before several sessions vanished): this absence is no verdict.
+			// Keep the last status; the tmux guard alerts once and runs
+			// recovery (2026-10-20 socket steal). Rows already dead never get
+			// here, so upstream's listing-only dead-row path costs nothing more.
+			return nil
+		}
 		if i.tmuxSession.AbsenceIsForeignServer() {
 			// This process runs inside another tmux server and its socket-less
 			// probe followed $TMUX there; the session is alive on the default
@@ -2664,6 +2674,12 @@ func (i *Instance) updateStatus(pass *StatusUpdatePass, syncMetadata bool) error
 	i.resetHookLagLocked()
 
 	if err != nil {
+		// A live control pipe can keep Exists() true while the socket points at
+		// another server; the capture then fails. Same suspect-socket hold as
+		// the absence branch.
+		if prevStatus != StatusError && i.tmuxSession.AbsenceVerdictHeld() {
+			return nil
+		}
 		// Debounce a transient capture failure: subprocess churn can make a single
 		// CapturePane fail, then recover. Hold at running for one sample rather than
 		// firing a false error. Modeled as a derived error with no tmux raw status.
@@ -2675,6 +2691,13 @@ func (i *Instance) updateStatus(pass *StatusUpdatePass, syncMetadata bool) error
 		i.tmuxFlipFromRunningPending = false
 		i.Status = StatusError
 		return err
+	}
+
+	// GetStatus reports "inactive" when the pane cannot be captured, which on a
+	// suspect socket means "asked the wrong server", not "pane died".
+	if status == "inactive" && prevStatus != StatusError && prevStatus != StatusStopped &&
+		i.tmuxSession.AbsenceVerdictHeld() {
+		return nil
 	}
 
 	// Map tmux status to instance status

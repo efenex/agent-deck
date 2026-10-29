@@ -977,6 +977,13 @@ func (s *Session) Start(command string) error {
 	}
 	workDir = resolvedWorkDir
 
+	// new-session may start a server, and tmux starts one by UNLINKING a socket
+	// that refuses connections, orphaning the live server behind it (the
+	// 2026-10-20 socket steal). Refuse instead. See server_guard.go.
+	if err := PrecheckServerStart(s.SocketName); err != nil {
+		return err
+	}
+
 	s.nameMu.Lock()
 	s.Command = command
 	s.nameMu.Unlock()

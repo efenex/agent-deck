@@ -45,6 +45,15 @@ func recoverFromStaleDefaultSocketIfNeeded(startErrOutput string) (bool, error) 
 		if isSocketAcceptingConnections(socketPath) {
 			continue
 		}
+		// A refusing socket is only stale when no live server can own it.
+		// Renaming it away from a server that is merely stalled is the socket
+		// steal by another route. See server_guard.go.
+		if owners, unknown, err := serversFor(socketPath); err != nil || len(owners)+len(unknown) > 0 {
+			statusLog.Warn("tmux_stale_socket_quarantine_refused",
+				slog.String("socket", socketPath),
+				slog.Int("live_servers", len(owners)+len(unknown)))
+			continue
+		}
 
 		backupPath := fmt.Sprintf("%s.stale.%d", socketPath, time.Now().UnixNano())
 		if err := os.Rename(socketPath, backupPath); err != nil {
