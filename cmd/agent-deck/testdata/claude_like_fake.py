@@ -10,7 +10,11 @@
 #     busy submit queues: queue-operation enqueue, composer shows 'Press up to edit queued messages',
 #     then after 1s remove(absorbed_mid_turn) + queued_command attachment (unchanged mailbox receipt);
 #     a control file with "hold_queue": true keeps queued input (and the hint) until the turn ends, like a long turn.
-import datetime, json, os, re, select, sys, termios, time, uuid
+import datetime, errno, json, os, re, select, signal, sys, termios, time, uuid
+# Shell wrappers can leave HUP ignored across exec. A fake belongs to its
+# terminal: restore termination even when the wrapper ignored the signal.
+signal.signal(signal.SIGHUP, signal.SIG_DFL)
+signal.signal(signal.SIGTERM, signal.SIG_DFL)
 here = os.path.dirname(os.path.abspath(__file__))
 path = json.load(open(os.path.join(here, 'fake-running.json')))[os.path.realpath(os.getcwd())]
 mailbox = path + '.midturn.json'
@@ -109,7 +113,13 @@ while True:
     poll_phase(); absorb()
     if phase in ('busy', 'stream', 'booting') and time.monotonic() - last_tick > 1: render(); last_tick = time.monotonic()
     if not select.select([0], [], [], 0.05)[0]: continue
-    chunk = ESC_RE.sub(b'', os.read(0, 65536))  # drops bracketed-paste 200~/201~ framing
+    try:
+        chunk = os.read(0, 65536)
+    except OSError as error:
+        if error.errno in (errno.EIO, errno.EBADF): break  # terminal/stdin closed
+        raise
+    if not chunk: break  # EOF stays readable; continuing here spins forever
+    chunk = ESC_RE.sub(b'', chunk)  # drops bracketed-paste 200~/201~ framing
     changed = False
     for ch in chunk.decode('utf-8', errors='replace'):
         if ch == '\r':

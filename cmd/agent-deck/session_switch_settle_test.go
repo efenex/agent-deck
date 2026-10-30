@@ -100,7 +100,7 @@ half() { # the dialog as a slow repaint leaves it: title and first row only
   clear
   printf '%s\n Accessing workspace:\n\n %s\n\n Quick safety check: Is this a project you created or one\n you trust? (Like your own code, a well-known open source project)\n\n ❯ No, exit\n' "────────────────────────────────────────" "$shown"
 }
-readkey() { IFS= read -rsn1 k; if [ "$k" = $'\e' ]; then IFS= read -rsn2 rest; k="ESC$rest"; fi; echo "key:[$k]" >> "$log"; }
+readkey() { IFS= read -rsn1 k || exit 0; if [ "$k" = $'\e' ]; then IFS= read -rsn2 rest || exit 0; k="ESC$rest"; fi; echo "key:[$k]" >> "$log"; }
 if [ "$mode" = trust ] || [ "$mode" = trust-slow ]; then
   cur=0
   if [ "$mode" = trust-slow ]; then half; sleep 1; fi
@@ -152,7 +152,12 @@ func startSettleFakePane(t *testing.T, name, mode, shownPath string) *settleFake
 	if err := p.sess.Start(p.command); err != nil {
 		t.Fatalf("start fake claude: %v", err)
 	}
-	t.Cleanup(func() { _ = p.sess.Kill() })
+	t.Cleanup(func() {
+		cleanupFakePaneGroups(t, nil, p.sess.SocketName, p.sess.Name)
+		if err := p.sess.KillAndWait(); err != nil {
+			t.Errorf("stop fake pane: %v", err)
+		}
+	})
 	return p
 }
 
@@ -165,7 +170,7 @@ func (p *settleFakePane) deps(t *testing.T, kicks *[]string) session.SettleDeps 
 	// The production tmux wiring, so the window targeting is under test.
 	deps := settleTmuxDeps(func() *tmux.Session { return p.sess })
 	deps.Restart = func() error {
-		if err := p.sess.Kill(); err != nil {
+		if err := p.sess.KillAndWait(); err != nil {
 			return err
 		}
 		return p.sess.Start(p.command)

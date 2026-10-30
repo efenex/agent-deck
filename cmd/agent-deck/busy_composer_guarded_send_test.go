@@ -181,7 +181,12 @@ func claudeLikeFakeControl(t *testing.T, phase string, extra map[string]any) (*t
 	if err := sess.Start("python3 -I " + filepath.Join(dir, "claude")); err != nil {
 		t.Fatalf("start fake: %v", err)
 	}
-	t.Cleanup(func() { _ = sess.Kill() })
+	t.Cleanup(func() {
+		cleanupFakePaneGroups(t, nil, sess.SocketName, sess.Name)
+		if err := sess.KillAndWait(); err != nil {
+			t.Errorf("stop fake pane: %v", err)
+		}
+	})
 	want := "All four steps ran."
 	if phase == "busy" {
 		want = "Thundering"

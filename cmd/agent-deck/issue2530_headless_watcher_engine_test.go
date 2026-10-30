@@ -72,6 +72,10 @@ func newIssue2530Env(t *testing.T) *issue2530Env {
 		"TERM=dumb",
 	)
 	t.Cleanup(func() {
+		// Capture and stop pane groups while the private server still knows
+		// their PIDs. kill-server alone leaves HUP-immune descendants alive.
+		cleanupFakePaneGroups(t, e.env, "", "")
+		e.killDetached()
 		kill := exec.Command("tmux", "kill-server")
 		kill.Env = e.env
 		_ = kill.Run()

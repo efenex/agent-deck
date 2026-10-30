@@ -72,7 +72,6 @@ func newDeliveryEnv(t *testing.T) *deliveryEnv {
 		"AGENTDECK_SEND_RETRY_BACKOFF_MAX=500ms",
 		"AGENTDECK_SEND_LAND_WINDOW=2s",
 	)
-	t.Cleanup(e.killDetached)
 	bin := filepath.Join(e.root, "fakebin")
 	if err := os.MkdirAll(bin, 0o700); err != nil {
 		t.Fatal(err)

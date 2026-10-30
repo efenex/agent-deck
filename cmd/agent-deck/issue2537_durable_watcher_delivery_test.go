@@ -73,7 +73,6 @@ func TestIssue2537_EventsForAStoppedConductorAreDeliveredOnceAfterQuit(t *testin
 		"AGENTDECK_SEND_RETRY_BACKOFF_MAX=500ms",
 		"AGENTDECK_SEND_LAND_WINDOW=2s",
 	)
-	t.Cleanup(e.killDetached)
 	e.createWebhookWatcher()
 
 	var conductor struct {
