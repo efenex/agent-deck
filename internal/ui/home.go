@@ -8469,9 +8469,24 @@ func (h *Home) renderSessionItem(
 		}
 	}
 	fitOptional(&worktreeBadge)
-	for _, badge := range []*string{&sandboxBadge, &multiRepoBadge, &sshBadge, &agentBadge} {
+	for _, badge := range []*string{&sandboxBadge, &multiRepoBadge} {
 		fitOptional(badge)
 	}
+	// Like the branch, shorten the original host inside intact brackets.
+	// Keep the ssh: label and at least one host cell (possibly an ellipsis).
+	if optionalBudget >= 0 && cellWidth(sshBadge) > optionalBudget {
+		badge := ""
+		if optionalBudget >= 8 {
+			badge = " [ssh:" + cellTruncate(inst.SSHHost, optionalBudget-7, "…") + "]"
+		}
+		if selected {
+			sshBadge = SessionStatusSelStyle.Render(badge)
+		} else {
+			sshBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Render(badge)
+		}
+	}
+	fitOptional(&sshBadge)
+	fitOptional(&agentBadge)
 	// Reserve the title's floor before the viewers and account badges claim
 	// any of the remaining width, so a narrow column shrinks and then drops
 	// the badges instead of collapsing the title (#2201). The viewers badge
