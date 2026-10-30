@@ -71,10 +71,23 @@ type codexThreadMeta struct {
 // flush after the first hook event referencing it.
 var codexThreadMetaCache sync.Map // sessionID string -> codexThreadMeta
 
+// Positive paths are stable for a Codex thread, but the rollout may be removed
+// or moved. Validate the exact entry on every hit instead of caching capability
+// booleans. Misses are deliberately not cached: the first flush must immediately
+// enable fork/resume, including when an earlier hook preceded the rollout.
+// Key by the whole pattern so per-session CODEX_HOME overrides stay isolated.
+var codexRolloutPaths = struct {
+	sync.RWMutex
+	paths map[string]string
+}{paths: make(map[string]string)}
+
 // codexRolloutPathInHome returns the flushed rollout JSONL path for a session
 // ID under codexHome/sessions, or "" when none exists.
 //
-// Codex layout: codexHome/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl
+// Codex layout: codexHome/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl.
+// CanFork calls this from the TUI footer and every web-menu row. Repeating the
+// glob there makes each frame scan all historical rollouts. Warm lookups only
+// lstat the known path; cold lookups and removals retain the discovery path.
 func codexRolloutPathInHome(sessionID, codexHome string) string {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
@@ -82,9 +95,38 @@ func codexRolloutPathInHome(sessionID, codexHome string) string {
 	}
 	pattern := filepath.Join(codexHome, "sessions", "*", "*", "*",
 		"rollout-*-"+sessionID+".jsonl")
+	// Preserve glob behavior for non-literal IDs supplied by legacy callers.
+	cacheable := !strings.ContainsAny(sessionID, "*?[\\")
+	if cacheable {
+		codexRolloutPaths.RLock()
+		cached := codexRolloutPaths.paths[pattern]
+		codexRolloutPaths.RUnlock()
+		if cached != "" {
+			// Glob tests directory entries, not symlink targets; Lstat preserves
+			// that behavior even for a dangling symlink.
+			if _, err := os.Lstat(cached); err == nil {
+				return cached
+			}
+			codexRolloutPaths.Lock()
+			if codexRolloutPaths.paths[pattern] == cached {
+				delete(codexRolloutPaths.paths, pattern)
+			}
+			codexRolloutPaths.Unlock()
+		}
+	}
+	// No filesystem I/O under the cache lock. Concurrent cold lookups may
+	// duplicate discovery, but cannot serialize unrelated sessions behind it.
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {
 		return ""
+	}
+	if cacheable {
+		codexRolloutPaths.Lock()
+		if len(codexRolloutPaths.paths) >= 4096 {
+			clear(codexRolloutPaths.paths)
+		}
+		codexRolloutPaths.paths[pattern] = matches[0]
+		codexRolloutPaths.Unlock()
 	}
 	return matches[0]
 }
