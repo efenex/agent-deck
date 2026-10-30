@@ -143,11 +143,17 @@ func TestSessionRowTitleFloorBoundaries(t *testing.T) {
 }
 
 func TestSessionRowTitleFloorOptionalBadges(t *testing.T) {
-	for _, width := range []int{42, 120} {
+	for _, tc := range []struct {
+		width             int
+		timestamp, nested bool
+	}{
+		{42, true, true}, {120, true, true}, {120, false, true}, {120, true, false}, {120, false, false},
+	} {
+		width := tc.width
 		for _, selected := range []bool{false, true} {
-			t.Run(fmt.Sprintf("width%d-selected%t", width, selected), func(t *testing.T) {
+			t.Run(fmt.Sprintf("width%d-selected%t-time%t-nested%t", width, selected, tc.timestamp, tc.nested), func(t *testing.T) {
 				h := NewHome()
-				h.showSessionTimestamps = true
+				h.showSessionTimestamps = tc.timestamp
 				inst := &session.Instance{ID: "crowded", Title: "luna-p678", Tool: "claude", Status: session.StatusWaiting,
 					WorktreePath: "/tmp/worktree", WorktreeBranch: "feature/luna/p678-prep-1030",
 					Sandbox: &session.SandboxConfig{Enabled: true}, SSHHost: "worker@very-long-hostname",
@@ -156,14 +162,21 @@ func TestSessionRowTitleFloorOptionalBadges(t *testing.T) {
 					accountDisplay: newAccountPresentation("personal", true)}
 				item := session.Item{Type: session.ItemTypeSession, Session: inst, Level: 2,
 					IsSubSession: true, IsLastSubSession: true, ParentIsLastInGroup: true}
+				if !tc.nested {
+					item.Level = 1
+					item.IsSubSession = false
+				}
 				var b strings.Builder
 				h.renderSessionItem(&b, item, selected, map[string]sessionRenderState{inst.ID: state}, width)
 				row := strings.TrimSuffix(stripAnsi(b.String()), "\n")
 				if !strings.Contains(row, inst.Title) || cellWidth(row) > width {
 					t.Fatalf("name or row width lost at %d: %q", width, row)
 				}
+				if width == 120 && strings.Contains(row, "2h ago") != tc.timestamp {
+					t.Errorf("wide row timestamp enabled=%v: %q", tc.timestamp, row)
+				}
 				if width == 120 {
-					for _, badge := range []string{"[sandbox]", "[ssh:", `[account:"personal"]`, "2h ago"} {
+					for _, badge := range []string{"[sandbox]", "[ssh:", `[account:"personal"]`} {
 						if !strings.Contains(row, badge) {
 							t.Errorf("wide row lost %q: %q", badge, row)
 						}
@@ -171,5 +184,48 @@ func TestSessionRowTitleFloorOptionalBadges(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Short names must not pay for unused title-floor cells. Critical mode and
+// supervisor indicators retain their pre-title-floor priority over the title.
+func TestSessionRowTitleFloorReviewRegressions(t *testing.T) {
+	for _, tc := range []struct {
+		name, title, tool, branch, want string
+		width                           int
+		timestamp, yolo                 bool
+	}{
+		{name: "short-worktree", title: "luna-p678", tool: "claude", branch: "feature/luna/p678-prep-1030", width: 52, timestamp: true, want: "2h ago"},
+		{name: "short-plain", title: "abc", tool: "claude", width: 24, timestamp: true, want: "2h ago"},
+		{name: "branch-from-original", title: "luna-p678-long-title", tool: "claude", branch: "feature/luna/p678-prep-1030", width: 38, want: "[feature/luna/…]"},
+		{name: "yolo", title: "luna-p678-long-title", tool: "gemini", width: 24, yolo: true, want: "[YOLO]"},
+		{name: "supervisor", title: session.MaestroSessionTitle, tool: "claude", width: 28, want: "[SUPERVISOR]"},
+		{name: "both-critical", title: session.MaestroSessionTitle, tool: "gemini", width: 32, yolo: true, want: "[SUPERVISOR] [YOLO]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewHome()
+			h.showSessionTimestamps = tc.timestamp
+			inst := &session.Instance{ID: "review", Title: tc.title, Tool: tc.tool, Status: session.StatusWaiting, CreatedAt: time.Now().Add(-2 * time.Hour)}
+			if tc.branch != "" {
+				inst.WorktreePath = "/tmp/worktree"
+				inst.WorktreeBranch = tc.branch
+			}
+			if tc.yolo {
+				inst.GeminiYoloMode = &tc.yolo
+			}
+			state := sessionRenderState{title: inst.Title, tool: inst.Tool, status: inst.Status}
+			var b strings.Builder
+			h.renderSessionItem(&b, session.Item{Type: session.ItemTypeSession, Session: inst, Level: 1, IsLastInGroup: true}, false, map[string]sessionRenderState{inst.ID: state}, tc.width)
+			row := strings.TrimSuffix(stripAnsi(b.String()), "\n")
+			if !strings.Contains(row, tc.want) {
+				t.Errorf("missing %q in %q", tc.want, row)
+			}
+			if tc.timestamp && !strings.Contains(row, tc.title) {
+				t.Errorf("short title missing: %q", row)
+			}
+			if cellWidth(row) > tc.width {
+				t.Errorf("row exceeds %d cells: %q", tc.width, row)
+			}
+		})
 	}
 }

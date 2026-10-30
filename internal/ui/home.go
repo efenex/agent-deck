@@ -145,10 +145,9 @@ const (
 // rendered width of the "N·" hotkey label.
 const leftGutterWidth = 2
 
-// minSessionTitleWidth is the floor the session title cell keeps in narrow
-// list columns. Optional badges are shortened or dropped when the row
-// runs out of room before taking space from the readable title,
-// which is the one piece of the row a user can't do without (#2201).
+// minSessionTitleWidth is the desired title floor after structural cells
+// and critical YOLO/SUPERVISOR indicators. Short titles reserve only their
+// actual width; optional badges yield to this readable title budget (#2201).
 const minSessionTitleWidth = 12
 
 // Minimum terminal size requirements (reduced for mobile support)
@@ -8228,7 +8227,8 @@ func (h *Home) renderSessionItem(
 
 	// Maestro (fleet supervisor): gold title by default. An explicit
 	// Instance.Color stays the stronger signal (issue #391 opt-in wins);
-	// the ⬢ glyph and [SUPERVISOR] badge below render unconditionally.
+	// the ⬢ glyph marks its title, and [SUPERVISOR] keeps priority over
+	// title width, just like the critical [YOLO] indicator.
 	isMaestro := inst.IsMaestro()
 	if isMaestro && inst.Color == "" {
 		titleStyle = titleStyle.Foreground(ColorYellow)
@@ -8426,16 +8426,18 @@ func (h *Home) renderSessionItem(
 	if isMaestro {
 		displayTitle = "⬢ " + displayTitle
 	}
-	// Reserve structural cells (including fold controls) and a readable title
-	// before any optional badge.
+	// Reserve structural cells and critical indicators before the title.
+	// YOLO and SUPERVISOR must remain visible even when the title must shrink.
 	// This applies at every width: restoring full badges at 40 columns used
 	// to erase worktree titles, particularly with timestamps or nested rows.
 	reserved := leftGutterWidth + cellWidth(baseIndent) + cellWidth(selectionPrefix) +
 		cellWidth(treeStyle.Render(treeConnector)) + cellWidth(windowChevron) + cellWidth(childFoldBadge) +
-		cellWidth(status) + 1
+		cellWidth(status) + 1 + cellWidth(maestroBadge) + cellWidth(yoloBadge)
+	// A short title only needs its actual display width, not the full floor.
+	titleReserve := min(minSessionTitleWidth, cellWidth(displayTitle))
 	optionalBudget := -1
 	if listWidth > 0 {
-		optionalBudget = max(0, listWidth-reserved-minSessionTitleWidth-1)
+		optionalBudget = max(0, listWidth-reserved-titleReserve-1)
 	}
 	// Atomic badges retain their meaning or disappear; never leave a partial
 	// tool, status label or bracket. Keep their existing display priority.
@@ -8450,16 +8452,15 @@ func (h *Home) renderSessionItem(
 		}
 		reserved += width
 	}
-	for _, badge := range []*string{&tool, &maestroBadge, &yoloBadge} {
-		fitOptional(badge)
-	}
+	fitOptional(&tool)
 	// Branch names can be elided inside intact brackets, after the title
 	// floor is reserved. Unlike atomic badges, this remains useful shortened.
 	if optionalBudget >= 0 && cellWidth(worktreeBadge) > optionalBudget {
 		badge := ""
 		if optionalBudget >= 4 {
-			branch := strings.TrimSuffix(strings.TrimPrefix(stripAnsi(worktreeBadge), " ["), "]")
-			badge = " [" + cellTruncate(branch, optionalBudget-3, "…") + "]"
+			// Start from the original branch, not the already elided badge,
+			// so ASCII dots cannot be carried into a second truncation.
+			badge = " [" + cellTruncate(inst.WorktreeBranch, optionalBudget-3, "…") + "]"
 		}
 		if selected {
 			worktreeBadge = SessionStatusSelStyle.Render(badge)
@@ -8509,7 +8510,7 @@ func (h *Home) renderSessionItem(
 	// Timestamps use only space left after the title and identity badges.
 	// Drop the whole timestamp rather than showing an ambiguous partial age.
 	if listWidth > 0 {
-		optionalBudget = max(0, listWidth-reserved-viewersWidth-triggersWidth-accountWidth-minSessionTitleWidth-1)
+		optionalBudget = max(0, listWidth-reserved-viewersWidth-triggersWidth-accountWidth-titleReserve-1)
 	}
 	fitOptional(&timestampBadge)
 	if listWidth > 0 {
