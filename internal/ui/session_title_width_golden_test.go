@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/asheshgoplani/agent-deck/internal/session"
 )
@@ -78,5 +79,97 @@ func TestSessionRowWidthBudget_Golden(t *testing.T) {
 				t.Fatalf("golden %s differs from the rendered row.\n--- want\n%s\n--- got\n%s", path, want, got)
 			}
 		})
+	}
+}
+
+// The 40-column threshold used to restore the full branch badge and tool,
+// consuming the title, especially with a timestamp or child indentation.
+func TestSessionRowTitleFloorBoundaries(t *testing.T) {
+	for _, width := range []int{39, 40, 42} {
+		for _, timestamp := range []bool{false, true} {
+			for _, nested := range []bool{false, true} {
+				name := fmt.Sprintf("width%d-time%t-nested%t", width, timestamp, nested)
+				t.Run(name, func(t *testing.T) {
+					h := NewHome()
+					h.showSessionTimestamps = timestamp
+					for _, title := range []string{"luna-p678", "luna-p678-long-title"} {
+						inst := &session.Instance{ID: "title-floor", Title: title, Tool: "claude", Status: session.StatusWaiting,
+							WorktreePath: "/tmp/worktree", WorktreeBranch: "feature/luna/p678-prep-1030", CreatedAt: time.Now().Add(-2 * time.Hour)}
+						item := session.Item{Type: session.ItemTypeSession, Session: inst, Level: 1, Path: "work", IsLastInGroup: true}
+						if nested {
+							item.Level = 2
+							item.IsSubSession = true
+							item.IsLastSubSession = true
+							item.ParentIsLastInGroup = true
+						}
+						state := sessionRenderState{status: inst.Status, tool: inst.Tool, title: title}
+						var b strings.Builder
+						h.renderSessionItem(&b, item, false, map[string]sessionRenderState{inst.ID: state}, width)
+						row := strings.TrimSuffix(stripAnsi(b.String()), "\n")
+						// Independent readable-name oracle; do not bless a golden hiding it.
+						wantTitle := title
+						if title != "luna-p678" {
+							wantTitle = "luna-p678-l"
+						}
+						if !strings.Contains(row, wantTitle) {
+							t.Errorf("title floor missing: want %q in %q", wantTitle, row)
+						}
+						if cellWidth(row) > width {
+							t.Errorf("row width %d exceeds %d: %q", cellWidth(row), width, row)
+						}
+						if title == "luna-p678" {
+							continue
+						}
+						path := filepath.Join("testdata", "session_row_width_budget", name+".txt")
+						got := row + "\n"
+						if os.Getenv("UPDATE_GOLDEN") != "" {
+							if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+								t.Fatal(err)
+							}
+						} else {
+							want, err := os.ReadFile(path)
+							if err != nil {
+								t.Fatal(err)
+							}
+							if string(want) != got {
+								t.Errorf("golden mismatch:\nwant %s\ngot %s", want, got)
+							}
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestSessionRowTitleFloorOptionalBadges(t *testing.T) {
+	for _, width := range []int{42, 120} {
+		for _, selected := range []bool{false, true} {
+			t.Run(fmt.Sprintf("width%d-selected%t", width, selected), func(t *testing.T) {
+				h := NewHome()
+				h.showSessionTimestamps = true
+				inst := &session.Instance{ID: "crowded", Title: "luna-p678", Tool: "claude", Status: session.StatusWaiting,
+					WorktreePath: "/tmp/worktree", WorktreeBranch: "feature/luna/p678-prep-1030",
+					Sandbox: &session.SandboxConfig{Enabled: true}, SSHHost: "worker@very-long-hostname",
+					CreatedAt: time.Now().Add(-2 * time.Hour)}
+				state := sessionRenderState{status: inst.Status, tool: inst.Tool, title: inst.Title,
+					accountDisplay: newAccountPresentation("personal", true)}
+				item := session.Item{Type: session.ItemTypeSession, Session: inst, Level: 2,
+					IsSubSession: true, IsLastSubSession: true, ParentIsLastInGroup: true}
+				var b strings.Builder
+				h.renderSessionItem(&b, item, selected, map[string]sessionRenderState{inst.ID: state}, width)
+				row := strings.TrimSuffix(stripAnsi(b.String()), "\n")
+				if !strings.Contains(row, inst.Title) || cellWidth(row) > width {
+					t.Fatalf("name or row width lost at %d: %q", width, row)
+				}
+				if width == 120 {
+					for _, badge := range []string{"[sandbox]", "[ssh:", `[account:"personal"]`, "2h ago"} {
+						if !strings.Contains(row, badge) {
+							t.Errorf("wide row lost %q: %q", badge, row)
+						}
+					}
+				}
+			})
+		}
 	}
 }
