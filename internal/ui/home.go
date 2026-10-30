@@ -146,8 +146,8 @@ const (
 const leftGutterWidth = 2
 
 // minSessionTitleWidth is the floor the session title cell keeps in narrow
-// list columns. The account badge (" [account:...]") is the first thing
-// shortened, then dropped, when the row runs out of room — never the title,
+// list columns. Optional badges are shortened or dropped when the row
+// runs out of room before taking space from the readable title,
 // which is the one piece of the row a user can't do without (#2201).
 const minSessionTitleWidth = 12
 
@@ -8426,31 +8426,50 @@ func (h *Home) renderSessionItem(
 	if isMaestro {
 		displayTitle = "⬢ " + displayTitle
 	}
-	// Include the stored slot in the existing badge/title cell budget. Normal
-	// titles need the same reservation as auto-names so the badge stays visible.
+	// Reserve structural cells (including fold controls) and a readable title
+	// before any optional badge.
+	// This applies at every width: restoring full badges at 40 columns used
+	// to erase worktree titles, particularly with timestamps or nested rows.
 	reserved := leftGutterWidth + cellWidth(baseIndent) + cellWidth(selectionPrefix) +
 		cellWidth(treeStyle.Render(treeConnector)) + cellWidth(windowChevron) + cellWidth(childFoldBadge) +
-		cellWidth(status) + 1 + cellWidth(tool) +
-		cellWidth(maestroBadge) + cellWidth(yoloBadge) + cellWidth(worktreeBadge) +
-		cellWidth(sandboxBadge) + cellWidth(multiRepoBadge) + cellWidth(sshBadge) +
-		cellWidth(agentBadge) + cellWidth(timestampBadge)
-	// Keep a useful title before spending narrow-row space on a worktree badge.
-	if listWidth > 0 && listWidth < 40 && worktreeBadge != "" {
-		originalWidth := cellWidth(worktreeBadge)
-		badgeWidth := max(0, listWidth-(reserved-originalWidth)-minSessionTitleWidth-1)
-		if originalWidth > badgeWidth {
-			badge := ""
-			if badgeWidth >= 4 {
-				branch := strings.TrimSuffix(strings.TrimPrefix(stripAnsi(worktreeBadge), " ["), "]")
-				badge = " [" + cellTruncate(branch, badgeWidth-3, "…") + "]"
+		cellWidth(status) + 1
+	optionalBudget := -1
+	if listWidth > 0 {
+		optionalBudget = max(0, listWidth-reserved-minSessionTitleWidth-1)
+	}
+	// Atomic badges retain their meaning or disappear; never leave a partial
+	// tool, status label or bracket. Keep their existing display priority.
+	fitOptional := func(badge *string) {
+		width := cellWidth(*badge)
+		if optionalBudget >= 0 {
+			if width > optionalBudget {
+				*badge = ""
+				return
 			}
-			if selected {
-				worktreeBadge = SessionStatusSelStyle.Render(badge)
-			} else {
-				worktreeBadge = lipgloss.NewStyle().Foreground(ColorCyan).Render(badge)
-			}
-			reserved = reserved - originalWidth + cellWidth(badge)
+			optionalBudget -= width
 		}
+		reserved += width
+	}
+	for _, badge := range []*string{&tool, &maestroBadge, &yoloBadge} {
+		fitOptional(badge)
+	}
+	// Branch names can be elided inside intact brackets, after the title
+	// floor is reserved. Unlike atomic badges, this remains useful shortened.
+	if optionalBudget >= 0 && cellWidth(worktreeBadge) > optionalBudget {
+		badge := ""
+		if optionalBudget >= 4 {
+			branch := strings.TrimSuffix(strings.TrimPrefix(stripAnsi(worktreeBadge), " ["), "]")
+			badge = " [" + cellTruncate(branch, optionalBudget-3, "…") + "]"
+		}
+		if selected {
+			worktreeBadge = SessionStatusSelStyle.Render(badge)
+		} else {
+			worktreeBadge = lipgloss.NewStyle().Foreground(ColorCyan).Render(badge)
+		}
+	}
+	fitOptional(&worktreeBadge)
+	for _, badge := range []*string{&sandboxBadge, &multiRepoBadge, &sshBadge, &agentBadge} {
+		fitOptional(badge)
 	}
 	// Reserve the title's floor before the viewers and account badges claim
 	// any of the remaining width, so a narrow column shrinks and then drops
@@ -8487,6 +8506,12 @@ func (h *Home) renderSessionItem(
 		}
 		accountBadge = accountStyle.Render(accountBadge)
 	}
+	// Timestamps use only space left after the title and identity badges.
+	// Drop the whole timestamp rather than showing an ambiguous partial age.
+	if listWidth > 0 {
+		optionalBudget = max(0, listWidth-reserved-viewersWidth-triggersWidth-accountWidth-minSessionTitleWidth-1)
+	}
+	fitOptional(&timestampBadge)
 	if listWidth > 0 {
 		budget := max(0, listWidth-reserved-viewersWidth-triggersWidth-accountWidth-1)
 		if cellWidth(displayTitle) > budget {
