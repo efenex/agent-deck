@@ -1,0 +1,1 @@
+   └─ ◐ remote-session-l… claude [ssh:worker@very-long-...]
