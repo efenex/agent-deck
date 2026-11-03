@@ -234,6 +234,7 @@ func MergeRow(dst *Row, patch Row) {
 	set(&dst.ToolID, patch.ToolID)
 	set(&dst.RawType, patch.RawType)
 	set(&dst.Origin, patch.Origin)
+	set(&dst.Seg, patch.Seg)
 	if patch.Finished != nil {
 		dst.Finished = patch.Finished
 	}

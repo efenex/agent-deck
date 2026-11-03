@@ -5,7 +5,7 @@ Run commands: agent-deck remote <name> <command> [arguments]
   Use remote exec <name> <command> when a name matches a management command.
   list/status/health, show/output/send, add/launch, session start/stop/restart/fork/archive/unarchive/set,
   session switch/switch-preview/switch-account (runs on the remote; its own accounts and harnesses),
-  recall timeline/follow/search/sessions/show/context/export/status, events follow, session send-status,
+  recall timeline/follow/chain/search/sessions/show/context/export/status, events follow, session send-status,
   session queue list/release/cancel (queue entry IDs; --json supported),
   triggers (read-only list: --session/--kind/--health/--all/--json),
   events publish forwards the Mac app's replies only (macapp.open.ack, macapp.browser.response,
