@@ -20,7 +20,8 @@ const RowsSchema = "agent-deck.recall.rows/v2"
 // command, system, compaction, turn_end, other. IDs are native: Claude
 // `uuid` / `uuid#block`, the tool_use id for a tool row, Codex item or call
 // ids; never line numbers, so they survive tail windows and reconnects.
-// Origin says who produced a user-side row (origin.go).
+// Origin says who produced a user-side row (origin.go); Seg names the native
+// conversation a row belongs to when a timeline spans a /clear chain.
 type Row struct {
 	ID       string         `json:"id"`
 	Kind     string         `json:"kind,omitempty"`
@@ -34,6 +35,7 @@ type Row struct {
 	IsError  *bool          `json:"is_error,omitempty"`
 	Queued   *bool          `json:"queued,omitempty"`
 	Origin   string         `json:"origin,omitempty"`
+	Seg      string         `json:"seg,omitempty"`
 	Meta     map[string]any `json:"meta,omitempty"`
 	Children []Row          `json:"children,omitempty"`
 	RawType  string         `json:"raw_type,omitempty"`

@@ -106,6 +106,29 @@ func instanceTarget(inst *session.Instance, peers []*session.Instance, storage *
 	return t, nil
 }
 
+// lookupRowsInstance finds the deck session a <session> argument names
+// without the index: deck session id, then a conversation id bound to a
+// session, then a title or id prefix.
+func lookupRowsInstance(ref string, instances []*session.Instance) *session.Instance {
+	for _, match := range []func(*session.Instance) bool{
+		func(i *session.Instance) bool { return i.ID == ref },
+		func(i *session.Instance) bool {
+			return ref != "" && (i.ClaudeSessionID == ref || i.CodexSessionID == ref)
+		},
+	} {
+		for _, i := range instances {
+			if match(i) {
+				return i
+			}
+		}
+	}
+	if !strings.HasPrefix(ref, "#") {
+		inst, _, _ := ResolveSession(ref, instances)
+		return inst
+	}
+	return nil
+}
+
 // resolveRowsTarget resolves <session> without the index first: deck
 // session id, then a conversation id bound to a deck session, then a deck
 // title or id prefix, then a native conversation file on disk, and only
@@ -169,26 +192,7 @@ func (lk *rowsLookup) close() {
 
 func (lk *rowsLookup) resolve(ref string) (*rowsTarget, error) {
 	instances, storage := lk.instances, lk.storage
-	var inst *session.Instance
-	for _, match := range []func(*session.Instance) bool{
-		func(i *session.Instance) bool { return i.ID == ref },
-		func(i *session.Instance) bool {
-			return ref != "" && (i.ClaudeSessionID == ref || i.CodexSessionID == ref)
-		},
-	} {
-		for _, i := range instances {
-			if match(i) {
-				inst = i
-				break
-			}
-		}
-		if inst != nil {
-			break
-		}
-	}
-	if inst == nil && !strings.HasPrefix(ref, "#") {
-		inst, _, _ = ResolveSession(ref, instances)
-	}
+	inst := lookupRowsInstance(ref, instances)
 	if inst != nil {
 		t, err := instanceTarget(inst, instances, storage)
 		if err == nil || !errors.Is(err, query.ErrRowsUnsupported) {
@@ -274,6 +278,49 @@ func (t *rowsTarget) liveStatusFunc() func() *query.LiveStatus {
 	}
 }
 
+func rowsErrorCode(err error) string {
+	var re *query.ResyncError
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return ErrCodeNotFound
+	case errors.As(err, &re):
+		return "RESYNC_REQUIRED"
+	}
+	return ErrCodeInvalidOperation
+}
+
+// handleRecallTimelineChain is `recall timeline --chain`: the rows page
+// spans the /clear chain of the session (internal/recall/query/chain.go).
+func handleRecallTimelineChain(profile, ref string, opts query.RowsOptions) {
+	out := NewCLIOutput(true, false)
+	chain, inst, storage, err := resolveChain(profile, ref)
+	if err != nil {
+		out.Error(err.Error(), chainErrorCode(err))
+		exitCLI(1)
+	}
+	defer storage.Close()
+	result, err := query.ReadChainRows(context.Background(), chain.Session.Harness, chain.Segments, opts)
+	if err != nil {
+		out.Error(err.Error(), rowsErrorCode(err))
+		exitCLI(1)
+	}
+	t := &rowsTarget{inst: inst, storage: storage}
+	result.Schema, result.Source = query.RowsSchema, "native"
+	result.Session = query.RowsSession{ID: inst.ID, Harness: chain.Session.Harness, NativeID: chain.Current, Title: inst.Title, Cwd: inst.EffectiveWorkingDir()}
+	for _, s := range chain.Segments {
+		if s.Current {
+			result.Session.Path = s.Path
+		}
+	}
+	if result.Turns == nil {
+		result.Turns = []query.Row{}
+	}
+	if fn := t.liveStatusFunc(); fn != nil {
+		result.Status = fn()
+	}
+	out.printJSON(result)
+}
+
 func handleRecallTimelineRows(profile string, ref string, f rowsFlags, opts query.RowsOptions) {
 	out := NewCLIOutput(true, false)
 	t, err := resolveRowsTarget(profile, ref, f)
@@ -307,15 +354,7 @@ func readRowsTimeline(t *rowsTarget, opts query.RowsOptions) (query.RowsTimeline
 		}
 	}
 	if err != nil {
-		code := ErrCodeInvalidOperation
-		var re *query.ResyncError
-		switch {
-		case errors.Is(err, os.ErrNotExist):
-			code = ErrCodeNotFound
-		case errors.As(err, &re):
-			code = "RESYNC_REQUIRED"
-		}
-		return query.RowsTimeline{}, code, err
+		return query.RowsTimeline{}, rowsErrorCode(err), err
 	}
 	result.Schema, result.Session = query.RowsSchema, t.session
 	result.Source = "native"
