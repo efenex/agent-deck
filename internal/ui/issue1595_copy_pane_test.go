@@ -13,6 +13,7 @@ import (
 
 	"github.com/asheshgoplani/agent-deck/internal/clipboard"
 	"github.com/asheshgoplani/agent-deck/internal/session"
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 	"github.com/asheshgoplani/agent-deck/internal/tmux"
 )
 
@@ -44,6 +45,7 @@ func TestIssue1595CaptureVisiblePaneDedicatedSocket(t *testing.T) {
 		t.Skip("tmux not installed")
 	}
 	socket := fmt.Sprintf("agentdeck-copy-pane-%d-%d", os.Getpid(), time.Now().UnixNano())
+	testutil.ReapTmuxSocket(t, socket)
 	const name = "copy-pane"
 	start := exec.Command("tmux", "-L", socket, "new-session", "-d", "-s", name,
 		"printf '\\033[31mhttps://example.test/path\\033[0m\\n'; sleep 10")

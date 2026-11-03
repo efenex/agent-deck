@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 )
 
 // CLI-level regression tests for issue #1031.
@@ -274,25 +276,27 @@ func cliEnvForIssue1031(home string) []string {
 }
 
 // tmuxEnvForIssue1031 returns the parent environment with every TMUX* variable
-// removed. This is the SOCKET RESOLUTION the launch subprocesses run under, and
-// teardown must share it byte for byte.
+// removed EXCEPT TMUX_TMPDIR. This is the SOCKET RESOLUTION the launch
+// subprocesses run under, and teardown must share it byte for byte.
 //
-// The 2026-07-18 pty-exhaustion incident is exactly what happens when it
-// doesn't. The package TestMain calls testutil.IsolateTmuxSocket, which points
-// TMUX_TMPDIR at a private /tmp/ad-tmux-* dir. The launch CLIs below strip
-// TMUX*, so THEIR `-L <socket>` resolves under tmux's default base (/tmp) —
-// while a teardown inheriting the test process's env looked for the same
-// `-L <socket>` under /tmp/ad-tmux-*. Two different paths, so `kill-server`
-// found nothing, reported "no server running", and the error was swallowed by
-// `_ =`. Every run left its servers behind, each holding a pty per pane; ~50 of
-// them took the machine's pty pool to 507/511 and no process could attach to
-// anything until they were reaped by hand.
+// TMUX_TMPDIR is the isolation itself: the package TestMain
+// (testutil.IsolateTmuxSocket) points it at a private /tmp/ad-tmux-* dir that
+// the watchdog and TestMain exit reap even after a SIGKILL/panic. These tests
+// used to drop it too, so their `-L ad1031-*` servers resolved under the real
+// /tmp/tmux-<uid>/ where nothing reaped them (a 5-day orphan escaped that way;
+// the 2026-07-18 pty exhaustion was the same path mismatch between spawn and
+// kill). Keeping it puts spawn, kill and the reaper on one directory.
+//
+// The race these tests exercise is untouched: it is N concurrent `launch`
+// processes load-modify-writing one SQLite state.db (shared HOME, same
+// profile). The tmux socket dir plays no part in it; every launch still shares
+// one -L socket/server, just under the isolated dir.
 //
 // Both halves matter: same env AND a checked error. Do not reintroduce either.
 func tmuxEnvForIssue1031() []string {
 	var env []string
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "TMUX") {
+		if isStrippedTmuxVar(kv[:strings.IndexByte(kv+"=", '=')]) {
 			continue
 		}
 		env = append(env, kv)
@@ -341,11 +345,11 @@ func tmuxServerAlive1031(socket string) bool {
 // timestamp-derived. A timestamped name meant every test run that crashed,
 // timed out, or was SIGKILL'd before t.Cleanup ran leaked a brand-new,
 // uniquely-named `ad1031-*` server that no later run could reach or reap —
-// they piled up and consumed ptys. With a stable name, the next run of the
-// same test inherits the same socket and reaps the leftover at setup (see
-// isolatedTmuxSocket1031).
+// they piled up and consumed ptys. With a stable name, a leftover is reaped at
+// setup (see isolatedTmuxSocket1031), and the socket lives in the isolated
+// TMUX_TMPDIR so a hard-killed run is reaped with the rest of that dir.
 //
-// We keep the name short on purpose: it lands under /tmp/tmux-<uid>/<name>
+// We keep the name short on purpose: it lands under $TMUX_TMPDIR/tmux-<uid>/<name>
 // which is a Unix-domain socket path with a hard ~108-char limit. The
 // 8-hex-digit hash stays well within it.
 func uniqueTmuxSocketName1031(t *testing.T) string {
@@ -355,32 +359,21 @@ func uniqueTmuxSocketName1031(t *testing.T) string {
 	return fmt.Sprintf("ad1031-%08x", h.Sum32())
 }
 
-// isolatedTmuxSocket1031 returns the deterministic isolated socket for this
-// test and guarantees the server on it is reaped both NOW (setup) and on
-// cleanup. The setup-time kill is the robust part: t.Cleanup cannot run when a
-// test times out, panics hard, or the test binary is SIGKILL'd — exactly the
-// paths that orphan the server. Reaping at setup means the next run of the same
-// test reclaims any leftover instead of leaking a new one.
+// isolatedTmuxSocket1031 returns the deterministic socket for this test, under
+// the isolated TMUX_TMPDIR, and guarantees the server on it is reaped at setup
+// and on cleanup. t.Cleanup cannot run when a test times out, panics hard, or
+// is SIGKILL'd; for those paths the server lives in the isolated dir, which the
+// TestMain watchdog / exit reaper kills (testutil.KillTmuxServersUnder). The
+// per-test cleanup is testutil.ReapTmuxSocket: it kills the server, fails the
+// test if one survives, and removes the socket file.
 func isolatedTmuxSocket1031(t *testing.T) string {
 	t.Helper()
 	socket := uniqueTmuxSocketName1031(t)
-	// Reap a server leaked by a prior crashed run before we start. Best-effort:
-	// a no-op when nothing is listening on the socket.
+	// Best-effort reap of a leftover on the same (deterministic) name inside
+	// the isolated dir, e.g. from an earlier test in this same run.
 	if err := killTmuxServer1031(socket); err != nil {
 		t.Logf("setup reap of %s: %v", socket, err)
 	}
-	t.Cleanup(func() {
-		// Never swallow this error, and never assume it worked: a kill-server
-		// that silently resolved the wrong socket path is precisely how the
-		// 2026-07-18 leak went unnoticed for weeks. Fail the test if a server
-		// outlives it — a leaked server holds a pty per pane.
-		if err := killTmuxServer1031(socket); err != nil {
-			t.Errorf("teardown: %v", err)
-		}
-		if tmuxServerAlive1031(socket) {
-			t.Errorf("teardown: a tmux server is STILL alive on socket %s — it will hold "+
-				"its panes' ptys until reaped by hand (2026-07-18 pty exhaustion)", socket)
-		}
-	})
+	testutil.ReapTmuxSocket(t, socket)
 	return socket
 }

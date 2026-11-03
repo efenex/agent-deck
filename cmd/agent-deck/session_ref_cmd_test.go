@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 )
 
 type sessionRefJSON struct {
@@ -41,6 +43,7 @@ func runSessionRefJSON(t *testing.T, home string, args ...string) (sessionRefJSO
 func writeSessionRefSocket(t *testing.T, home, purpose string) string {
 	t.Helper()
 	socket := fmt.Sprintf("session-ref-%s-%d", purpose, os.Getpid())
+	testutil.ReapTmuxSocket(t, socket)
 	dir := filepath.Join(home, ".config", "agent-deck")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/asheshgoplani/agent-deck/internal/session"
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 )
 
 func TestTitleFormatWebAndTUIGroupPersistence(t *testing.T) {
@@ -19,6 +20,7 @@ func TestTitleFormatWebAndTUIGroupPersistence(t *testing.T) {
 	h, storage := newHeadlessHomeForTest(t, "_test_title_format")
 	inst := session.NewInstanceWithGroupAndTool("display", t.TempDir(), "before/nested", "shell")
 	socket := fmt.Sprintf("title-web-%d", time.Now().UnixNano())
+	testutil.ReapTmuxSocket(t, socket)
 	inst.TmuxSocketName = socket
 	sess := inst.GetTmuxSession()
 	sess.SocketName = socket
