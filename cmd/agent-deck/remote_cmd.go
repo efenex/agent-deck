@@ -225,7 +225,7 @@ func printRemoteUsage() {
 	fmt.Println("  Use remote exec <name> <command> when a name matches a management command.")
 	fmt.Println("  list/status/health, show/output/send, add/launch, session start/stop/restart/fork/archive/unarchive/set,")
 	fmt.Println("  session switch/switch-preview/switch-account (runs on the remote; its own accounts and harnesses),")
-	fmt.Println("  recall timeline/follow/search/sessions/show/context/export/status, events follow, session send-status,")
+	fmt.Println("  recall timeline/follow/chain/search/sessions/show/context/export/status, events follow, session send-status,")
 	fmt.Println("  session queue list/release/cancel (queue entry IDs; --json supported),")
 	fmt.Println("  triggers (read-only list: --session/--kind/--health/--all/--json),")
 	fmt.Println("  events publish forwards the Mac app's replies only (macapp.open.ack, macapp.browser.response,")

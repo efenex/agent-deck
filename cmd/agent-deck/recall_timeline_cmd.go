@@ -19,8 +19,9 @@ func handleRecallTimeline(profile string, args []string) {
 	limit := fs.Int("limit", 0, "Maximum older rows with --before; otherwise stop after N new rows and resume with --since")
 	tail := fs.Int("tail", 0, "Only the last N rows, read from the end of the transcript (fast first paint)")
 	agentID := fs.String("agent", "", "One Claude Code sub-agent sidechain by agent id")
+	chain := fs.Bool("chain", false, "Span the session's /clear chain: --tail fills across conversations, --before pages back through them (see recall chain)")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "Usage: agent-deck recall timeline <session> --json [--since <cursor> | --before <cursor> --limit N] [--limit N] [--tail N] [--agent <id>]")
+		fmt.Fprintln(fs.Output(), "Usage: agent-deck recall timeline <session> --json [--since <cursor> | --before <cursor> --limit N] [--limit N] [--tail N] [--agent <id>] [--chain]")
 		fmt.Fprintln(fs.Output(), "       agent-deck recall timeline --json --transcript <file> --harness claude|codex")
 		fmt.Fprintln(fs.Output(), "       agent-deck recall timeline <session> --json --v1   (slice-6 turn shape)")
 		fmt.Fprintln(fs.Output(), "<session>: deck session id, title or id prefix; a Claude/Codex conversation id; or #n / any id the index knows.")
@@ -40,12 +41,20 @@ func handleRecallTimeline(profile string, args []string) {
 		out.Error(err.Error(), ErrCodeInvalidOperation)
 		exitCLI(2)
 	}
+	if *chain && (*rf.v1 || *rf.transcript != "" || *since != "" || *agentID != "") {
+		out.Error("recall timeline: --chain cannot combine with --v1, --transcript, --since or --agent", ErrCodeInvalidOperation)
+		exitCLI(2)
+	}
 	if *rf.v1 && *before != "" {
 		out.Error("recall timeline: --before is unsupported with --v1", ErrCodeInvalidOperation)
 		exitCLI(2)
 	}
 	if !*rf.v1 {
 		requireRecallEnabled(out)
+		if *chain {
+			handleRecallTimelineChain(profile, fs.Arg(0), opts)
+			return
+		}
 		handleRecallTimelineRows(profile, fs.Arg(0), rf, opts)
 		return
 	}
