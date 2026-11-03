@@ -309,8 +309,20 @@ func (h *Home) renderEmbeddedSessionItem(
 		toolPrefix = toolIcon + " "
 	}
 
+	// Per-session accent: a coloured bar leads an unselected row; the selected
+	// / embedded row keeps its "▶" / "┃" glyph but takes the accent hue.
+	accent := sessionAccentColor(inst)
+	styledMarker := marker
+	if accent != "" {
+		glyph := marker
+		if !selected && !embedded {
+			glyph = sessionAccentMarker + " "
+		}
+		styledMarker = lipgloss.NewStyle().Foreground(accent).Render(glyph)
+	}
+
 	firstPlain := gutter + indent + marker + chevron + statusIcon + " " + toolPrefix + label
-	first := gutter + indent + marker + chevron + statusStyle.Render(statusIcon) + " "
+	first := gutter + indent + styledMarker + chevron + statusStyle.Render(statusIcon) + " "
 	if toolPrefix != "" {
 		first += GetToolStyle(tool).Bold(true).Render(toolIcon) + " "
 	}
@@ -344,7 +356,15 @@ func (h *Home) renderEmbeddedSessionItem(
 	first = fitCellWidth(first, max(1, listWidth))
 	if highlighted {
 		style := lipgloss.NewStyle().Foreground(ColorText).Background(ColorSurface)
-		first = style.Render(fitCellWidth(firstPlain, max(1, listWidth)))
+		if accent != "" {
+			lead := gutter + indent
+			rest := fitCellWidth(chevron+statusIcon+" "+toolPrefix+label, max(1, listWidth-cellWidth(lead)-cellWidth(marker)))
+			first = style.Render(lead) +
+				lipgloss.NewStyle().Foreground(accent).Background(ColorSurface).Render(marker) +
+				style.Render(rest)
+		} else {
+			first = style.Render(fitCellWidth(firstPlain, max(1, listWidth)))
+		}
 	} else {
 		first = lipgloss.NewStyle().Foreground(ColorText).Render(first)
 	}
