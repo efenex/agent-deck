@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 )
 
 // TestTUIAttachKeepsKeysTypedRightAfterEnter runs the real TUI on a pty and
@@ -39,6 +41,7 @@ func TestTUIAttachKeepsKeysTypedRightAfterEnter(t *testing.T) {
 		}
 	}
 	socket := fmt.Sprintf("earlykeys-%d", time.Now().UnixNano())
+	testutil.ReapTmuxSocket(t, socket)
 	write(filepath.Join(home, ".config", "agent-deck", "config.toml"), "[telemetry]\ndisabled = true\n[updates]\ncheck_enabled = false\n[claude]\nhooks_enabled = false\n[tmux]\nsocket_name = '"+socket+"'\n") // no first-run dialogs
 	write(filepath.Join(home, ".zshrc"), "# early keys test\n")
 	receiver := filepath.Join(home, "receiver.py")
@@ -55,7 +58,7 @@ while True:
 	var env []string
 	for _, kv := range os.Environ() {
 		key := strings.SplitN(kv, "=", 2)[0]
-		if key == "HOME" || key == "TERM" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || strings.HasPrefix(key, "TMUX") {
+		if key == "HOME" || key == "TERM" || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "AGENTDECK_") || isStrippedTmuxVar(key) {
 			continue
 		}
 		env = append(env, kv)
@@ -77,7 +80,7 @@ while True:
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, "tmux", append([]string{"-L", socket}, args...)...)
-		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, tmuxTmpdirEnv()}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("tmux %v: %v %s", args, err, out)

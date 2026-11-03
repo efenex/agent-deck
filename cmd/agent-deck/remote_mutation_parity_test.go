@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/asheshgoplani/agent-deck/internal/statedb"
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -35,6 +36,9 @@ func TestRemoteSuccessfulMutationParity(t *testing.T) {
 	write(filepath.Join(controller, ".config/agent-deck/config.toml"), fmt.Sprintf("[remotes.lab]\nhost = 'test-host'\nagent_deck_path = '%s'\n", bin))
 	homes := []string{local, server}
 	sockets := []string{fmt.Sprintf("parity-local-%d", time.Now().UnixNano()), fmt.Sprintf("parity-server-%d", time.Now().UnixNano())}
+	for _, socket := range sockets {
+		testutil.ReapTmuxSocket(t, socket)
+	}
 	git := func(home string, args ...string) string {
 		t.Helper()
 		out, err := exec.Command("git", append([]string{"-C", home}, args...)...).CombinedOutput()

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 )
 
 // TestAttachDeliversNoInput is the tmux-only half of TestNativeSSHAttachLifecycle:
@@ -37,6 +39,7 @@ func TestAttachDeliversNoInput(t *testing.T) {
 		}
 	}
 	socket := fmt.Sprintf("noinput-%d", time.Now().UnixNano())
+	testutil.ReapTmuxSocket(t, socket)
 	write(filepath.Join(home, ".config", "agent-deck", "config.toml"), "[tmux]\nsocket_name = '"+socket+"'\n")
 	write(filepath.Join(home, ".zshrc"), "# attach no-input test\n")
 	receiver := filepath.Join(home, "receiver.py")

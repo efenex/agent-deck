@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asheshgoplani/agent-deck/internal/session"
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 )
 
 // Separate CLI processes must initialize the same policy as a TUI. Actual tmux
@@ -33,6 +34,7 @@ func TestTitleFormatIndependentCLI(t *testing.T) {
 			session.ReloadUserConfig()
 			t.Cleanup(session.ClearUserConfigCache)
 			socket := fmt.Sprintf("title-cli-%d", time.Now().UnixNano())
+			testutil.ReapTmuxSocket(t, socket)
 			cfg := filepath.Join(home, ".agent-deck", "config.toml")
 			if err := os.MkdirAll(filepath.Dir(cfg), 0700); err != nil {
 				t.Fatal(err)

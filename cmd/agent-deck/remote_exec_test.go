@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/asheshgoplani/agent-deck/internal/session"
 	"github.com/asheshgoplani/agent-deck/internal/statedb"
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -60,6 +61,7 @@ func TestRemoteCommandParity(t *testing.T) {
 		return out.String(), stderr.String(), code
 	}
 	socket := fmt.Sprintf("parity-%d", time.Now().UnixNano())
+	testutil.ReapTmuxSocket(t, socket)
 	write(filepath.Join(remote, ".config", "agent-deck", "config.toml"), "[tmux]\nsocket_name = '"+socket+"'\n[profiles.person_a.claude]\nconfig_dir = '"+filepath.Join(remote, "claude-a")+"'\n[mcps.parity]\ncommand = 'true'\n", 0600)
 
 	title := "parity 'quoted' $value"

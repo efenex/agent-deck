@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 )
 
 // This starts the full TUI, not the separate session-attach command. An outer
@@ -77,6 +79,8 @@ func TestNativeSSHTUIRegistryLifecycle(t *testing.T) {
 	}
 	inner := fmt.Sprintf("nt-in-%d", time.Now().UnixNano())
 	outer := fmt.Sprintf("nt-out-%d", time.Now().UnixNano())
+	testutil.ReapTmuxSocket(t, inner)
+	testutil.ReapTmuxSocket(t, outer)
 	// Update checking is disabled for determinism. AGENTDECK_SKIP_UPDATE_CHECK
 	// (set in the launch env above) is the load-bearing switch: without it the
 	// TUI auto-installs a newer release and restarts itself in place mid-test

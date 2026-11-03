@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 )
 
 // Remote parity walk on g14 (2026-09-18), finding 3: a session created on a
@@ -35,6 +37,7 @@ func TestRemoteCreatePathCarriesIdentity(t *testing.T) {
 	}
 	write(filepath.Join(controller, ".config", "agent-deck", "config.toml"), fmt.Sprintf("[remotes.lab]\nhost = 'test-host'\nagent_deck_path = '%s'\n", bin), 0600)
 	socket := fmt.Sprintf("identity-server-%d", time.Now().UnixNano())
+	testutil.ReapTmuxSocket(t, socket)
 	write(filepath.Join(server, ".config", "agent-deck", "config.toml"), "[tmux]\nsocket_name = '"+socket+"'\n", 0600)
 	startParitySSH(t, server, shim)
 	// The server's `claude`: records its argv and environment, then stays

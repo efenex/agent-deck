@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/asheshgoplani/agent-deck/internal/sshcontrol"
+	"github.com/asheshgoplani/agent-deck/internal/testutil"
 	"github.com/creack/pty"
 )
 
@@ -49,6 +50,7 @@ func TestNativeSSHAttachLifecycle(t *testing.T) {
 	write(shimPath, strings.Replace(string(shimBody), "#!/bin/sh\n", "#!/bin/sh\nprintf '%s' \"$$\" > \"$NATIVE_SSH_PID_FILE\"\n", 1))
 	write(filepath.Join(controller, ".config", "agent-deck", "config.toml"), fmt.Sprintf("[remotes.lab]\nhost = 'test-host'\nagent_deck_path = '%s'\n", bin))
 	socket := fmt.Sprintf("native-%d", time.Now().UnixNano())
+	testutil.ReapTmuxSocket(t, socket)
 	write(filepath.Join(remote, ".config", "agent-deck", "config.toml"), "[tmux]\nsocket_name = '"+socket+"'\n")
 	receiver := filepath.Join(remote, "receiver.py")
 	write(receiver, `import os, tty, hashlib, uuid, sys
