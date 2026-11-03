@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A session's accent colour (`agent-deck session set <id> color <#RRGGBB|0-255>`, clear with `''`) now reaches the whole row and the preview pane. An unselected row gets a coloured bar in the selection column, the selected row keeps the accent (arrow and highlight) instead of dropping it, and the preview title, rule, divider and embedded-terminal border take the selected session's colour. Sessions without a colour render exactly as before.
+
 ## [1.16.34] - 2026-10-25
 
 ### Highlights

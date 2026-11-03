@@ -8240,20 +8240,46 @@ func (h *Home) renderSessionItem(
 
 	// Selection indicator
 	selectionPrefix := " "
+	// Per-session accent: an unselected row gets a coloured bar in the
+	// (otherwise blank) selection column. Same width as the blank, so the
+	// layout is unchanged; no accent leaves the column blank.
+	accent := sessionAccentColor(inst)
+	if accent != "" && !selected {
+		selectionPrefix = lipgloss.NewStyle().Foreground(accent).Render(sessionAccentMarker)
+	}
 	if selected {
 		selectionPrefix = SessionSelectionPrefix.Render("▶")
 		titleStyle = SessionTitleSelStyle
+		if accent != "" {
+			// The selected row repaints title/status with the selection
+			// highlight, which used to throw the accent away. Keep it: the
+			// arrow takes the accent hue and the highlight bar uses it as its
+			// background.
+			selectionPrefix = SessionSelectionPrefix.Foreground(accent).Render("▶")
+			titleStyle = SessionTitleSelStyle.Background(accent)
+		}
 		toolStyle = SessionStatusSelStyle
 		statusStyle = SessionStatusSelStyle
+		if accent != "" {
+			toolStyle = toolStyle.Background(accent)
+			statusStyle = statusStyle.Background(accent)
+		}
 		status = statusStyle.Render(statusIcon)
 		// Tree connector also gets selection styling
 		treeStyle = TreeConnectorSelStyle
+		if accent != "" {
+			treeStyle = treeStyle.Background(accent)
+		}
 		// Rebuild baseIndent with selection arrow for sub-sessions
 		// Replace the │ (or empty space) with ▶ so the arrow doesn't squeeze
 		// between tree connector characters (e.g. " │▶├─" → " ▶ ├─")
 		if item.IsSubSession {
 			groupIndent := strings.Repeat(treeEmpty, max(0, item.Level-2))
-			baseIndent = groupIndent + SessionSelectionPrefix.Render(" ▶")
+			arrowStyle := SessionSelectionPrefix
+			if accent != "" {
+				arrowStyle = arrowStyle.Foreground(accent)
+			}
+			baseIndent = groupIndent + arrowStyle.Render(" ▶")
 			selectionPrefix = " "
 		}
 	}

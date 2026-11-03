@@ -1034,16 +1034,58 @@ func (h *Home) renderFrame() string {
 
 // renderPanelTitle creates a styled section title with underline
 func (h *Home) renderPanelTitle(title string, width int) string {
+	return h.renderPanelTitleAccent(title, width, "")
+}
+
+// sessionAccentMarker is the bar glyph that leads a session row (and fills
+// the preview divider) when the session has an accent colour set.
+const sessionAccentMarker = "▌"
+
+// sessionAccentColor returns the per-session accent (the `color` field set by
+// `agent-deck session set <id> color <#RRGGBB|0..255>`), or "" when none is
+// set. Empty means "render exactly as before".
+func sessionAccentColor(inst *session.Instance) lipgloss.Color {
+	if inst == nil || strings.TrimSpace(inst.Color) == "" {
+		return ""
+	}
+	return lipgloss.Color(strings.TrimSpace(inst.Color))
+}
+
+// previewAccent returns the accent of the session the preview pane is
+// showing: the embedded (insert-mode) session while attached, otherwise the
+// cursor's session. "" when there is none or it has no accent.
+func (h *Home) previewAccent() lipgloss.Color {
+	if h.embeddedMode && h.insertModeSessionID != "" {
+		return sessionAccentColor(h.getInstanceByID(h.insertModeSessionID))
+	}
+	if h.cursor < 0 || h.cursor >= len(h.flatItems) {
+		return ""
+	}
+	item := h.flatItems[h.cursor]
+	if item.Type != session.ItemTypeSession {
+		return ""
+	}
+	return sessionAccentColor(item.Session)
+}
+
+// renderPanelTitleAccent is renderPanelTitle with an optional accent colour
+// that replaces the title and underline hues. An empty accent is the default
+// look.
+func (h *Home) renderPanelTitleAccent(title string, width int, accent lipgloss.Color) string {
 	// Truncate title if it exceeds width
 	title = truncateDisplay(title, width, "...")
 
+	titleColor, ruleColor := ColorCyan, ColorBorder
+	if accent != "" {
+		titleColor, ruleColor = accent, accent
+	}
 	titleStyle := lipgloss.NewStyle().
-		Foreground(ColorCyan).
+		Foreground(titleColor).
 		Bold(true).
 		Width(width)
 
 	underlineStyle := lipgloss.NewStyle().
-		Foreground(ColorBorder).
+		Foreground(ruleColor).
 		Width(width)
 
 	// Create underline that extends to panel width
@@ -1633,14 +1675,18 @@ func (h *Home) renderDualColumnLayout(contentHeight int) string {
 		rightContent := h.renderPreviewPane(innerWidth, innerHeight)
 		rightContent = ensureExactHeight(rightContent, innerHeight)
 		rightContent = ensureExactWidth(rightContent, innerWidth)
+		borderColor := ColorAccent
+		if pa := h.previewAccent(); pa != "" {
+			borderColor = pa
+		}
 		rightPanel = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorAccent).
+			BorderForeground(borderColor).
 			Width(innerWidth).
 			Height(innerHeight).
 			Render(rightContent)
 	} else {
-		rightTitle := h.renderPanelTitle(previewTitle, rightWidth)
+		rightTitle := h.renderPanelTitleAccent(previewTitle, rightWidth, h.previewAccent())
 		rightContent := h.renderPreviewPane(rightWidth, panelContentHeight)
 		rightContent = ensureExactHeight(rightContent, panelContentHeight)
 		rightPanel = rightTitle + "\n" + rightContent
@@ -1659,6 +1705,11 @@ func (h *Home) renderDualColumnLayout(contentHeight int) string {
 	if h.hoverDivider || h.draggingDivider {
 		separatorGlyph = " ┃ "
 		separatorColor = ColorAccent
+	} else if pa := h.previewAccent(); pa != "" {
+		// Accent session: the divider is the preview pane's left edge, so a
+		// heavy bar in the accent colour frames it. Width-neutral.
+		separatorGlyph = " ┃ "
+		separatorColor = pa
 	}
 	// Every row is the same constant string, so style it once and reuse it
 	// instead of paying a lipgloss render per screen row per frame.
@@ -1741,7 +1792,7 @@ func (h *Home) renderStackedLayout(totalHeight int) string {
 	b.WriteString("\n")
 
 	// Preview (full width)
-	previewTitle := h.renderPanelTitle("PREVIEW", h.width)
+	previewTitle := h.renderPanelTitleAccent("PREVIEW", h.width, h.previewAccent())
 	previewContent := h.renderPreviewPane(h.width, previewHeight-2) // -2 for title
 	previewContent = ensureExactHeight(previewContent, previewHeight-2)
 	b.WriteString(previewTitle)
@@ -1776,9 +1827,13 @@ func (h *Home) renderEmbeddedOnlyLayout(contentHeight int) string {
 	innerHeight := max(1, contentHeight-2)
 	content := h.renderPreviewPane(innerWidth, innerHeight)
 	content = ensureExactWidth(ensureExactHeight(content, innerHeight), innerWidth)
+	borderColor := ColorAccent
+	if pa := h.previewAccent(); pa != "" {
+		borderColor = pa
+	}
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorAccent).
+		BorderForeground(borderColor).
 		Width(innerWidth).
 		Height(innerHeight).
 		Render(content)
