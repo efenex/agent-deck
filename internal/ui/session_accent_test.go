@@ -109,3 +109,30 @@ func TestSessionAccent_PanelTitle(t *testing.T) {
 		t.Fatalf("accent changed title width")
 	}
 }
+
+func TestSessionAccent_EmbeddedSidebarRow(t *testing.T) {
+	forceTrueColorProfile()
+	render := func(color string, selected bool) string {
+		inst := &session.Instance{ID: "acc-e", Title: "tower", Tool: "claude", Color: color}
+		h := &Home{width: 140, embeddedLayout: true}
+		var b strings.Builder
+		h.renderEmbeddedSessionItem(&b, session.Item{Type: session.ItemTypeSession, Session: inst, Level: 1},
+			selected, sessionRenderState{status: session.StatusRunning, tool: "claude"}, 48)
+		return b.String()
+	}
+	for _, selected := range []bool{false, true} {
+		plain, tinted := render("", selected), render("#FF0000", selected)
+		if strings.Contains(plain, accentFG) {
+			t.Fatalf("selected=%v: no-accent sidebar row has accent escape", selected)
+		}
+		if !strings.Contains(tinted, accentFG) {
+			t.Fatalf("selected=%v: accent sidebar row missing accent: %q", selected, tinted)
+		}
+		if !selected && !strings.Contains(tinted, sessionAccentMarker) {
+			t.Fatalf("unselected accent sidebar row missing marker: %q", tinted)
+		}
+		if pw, tw := ansi.StringWidth(plain), ansi.StringWidth(tinted); pw != tw {
+			t.Fatalf("selected=%v: accent changed sidebar row width %d -> %d", selected, pw, tw)
+		}
+	}
+}

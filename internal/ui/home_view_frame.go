@@ -1646,6 +1646,7 @@ func (h *Home) renderDualColumnLayout(contentHeight int) string {
 	// with chrome / min-width clamping (issue #1113) so the PREVIEW pane never
 	// shrinks below its title width.
 	leftWidth, rightWidth := h.splitPaneWidths()
+	accent := h.previewAccent() // once per frame
 
 	// Panel title is exactly 2 lines (title + underline)
 	// Panel content gets the remaining space: contentHeight - 2
@@ -1676,8 +1677,8 @@ func (h *Home) renderDualColumnLayout(contentHeight int) string {
 		rightContent = ensureExactHeight(rightContent, innerHeight)
 		rightContent = ensureExactWidth(rightContent, innerWidth)
 		borderColor := ColorAccent
-		if pa := h.previewAccent(); pa != "" {
-			borderColor = pa
+		if accent != "" {
+			borderColor = accent
 		}
 		rightPanel = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -1686,7 +1687,7 @@ func (h *Home) renderDualColumnLayout(contentHeight int) string {
 			Height(innerHeight).
 			Render(rightContent)
 	} else {
-		rightTitle := h.renderPanelTitleAccent(previewTitle, rightWidth, h.previewAccent())
+		rightTitle := h.renderPanelTitleAccent(previewTitle, rightWidth, accent)
 		rightContent := h.renderPreviewPane(rightWidth, panelContentHeight)
 		rightContent = ensureExactHeight(rightContent, panelContentHeight)
 		rightPanel = rightTitle + "\n" + rightContent
@@ -1705,11 +1706,11 @@ func (h *Home) renderDualColumnLayout(contentHeight int) string {
 	if h.hoverDivider || h.draggingDivider {
 		separatorGlyph = " ┃ "
 		separatorColor = ColorAccent
-	} else if pa := h.previewAccent(); pa != "" {
+	} else if accent != "" {
 		// Accent session: the divider is the preview pane's left edge, so a
 		// heavy bar in the accent colour frames it. Width-neutral.
 		separatorGlyph = " ┃ "
-		separatorColor = pa
+		separatorColor = accent
 	}
 	// Every row is the same constant string, so style it once and reuse it
 	// instead of paying a lipgloss render per screen row per frame.
