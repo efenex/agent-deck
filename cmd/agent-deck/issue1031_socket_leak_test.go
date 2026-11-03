@@ -1,9 +1,36 @@
 package main
 
 import (
+	"os"
 	"os/exec"
+	"strings"
 	"testing"
 )
+
+// TestTmuxEnvForIssue1031_KeepsIsolatedTmpdir pins that the launch
+// subprocesses (and teardown) resolve -L sockets under the isolated
+// TMUX_TMPDIR, never the real /tmp/tmux-<uid>, while $TMUX/$TMUX_PANE (which
+// would route to the caller's server) are still dropped.
+func TestTmuxEnvForIssue1031_KeepsIsolatedTmpdir(t *testing.T) {
+	want := os.Getenv("TMUX_TMPDIR")
+	if want == "" {
+		t.Fatal("TMUX_TMPDIR unset: package TestMain should have isolated tmux")
+	}
+	t.Setenv("TMUX", "/tmp/should-be-dropped,1,0")
+	t.Setenv("TMUX_PANE", "%9")
+	got := ""
+	for _, kv := range tmuxEnvForIssue1031() {
+		switch {
+		case strings.HasPrefix(kv, "TMUX_TMPDIR="):
+			got = strings.TrimPrefix(kv, "TMUX_TMPDIR=")
+		case strings.HasPrefix(kv, "TMUX="), strings.HasPrefix(kv, "TMUX_PANE="):
+			t.Errorf("env leaks %q into the launch subprocess", kv)
+		}
+	}
+	if got != want {
+		t.Fatalf("TMUX_TMPDIR = %q, want isolated %q", got, want)
+	}
+}
 
 // Regression coverage for the leaked-tmux-server class behind issue #1031's
 // test harness. The launch-race tests run on an isolated `tmux -L <socket>`
@@ -14,13 +41,16 @@ import (
 // reuse or reap. Observed in the wild as a pile of orphaned `tmux -L ad1031-*`
 // servers consuming ptys.
 //
-// The fix makes the socket name deterministic per test and reaps any server
-// left on it at SETUP (not just cleanup), so the next run of the same test
-// inherits and kills the prior leak instead of stacking a new one.
+// The socket now lives under the isolated TMUX_TMPDIR (the launch CLIs keep it),
+// so a hard-killed run is reaped by the TestMain watchdog/exit reaper together
+// with the rest of that dir; the name stays deterministic per test and any
+// server left on it is reaped at SETUP too. There is no cross-run reap of the
+// fixed name in the real /tmp/tmux-<uid> any more, by design: nothing of these
+// tests lives there.
 
 // TestIsolatedTmuxSocket1031_IsDeterministic pins that the same test always
 // resolves to the same socket name. Without this, a leaked server is
-// unreachable by the next run and accumulates forever.
+// unreachable by the setup reap.
 func TestIsolatedTmuxSocket1031_IsDeterministic(t *testing.T) {
 	a := uniqueTmuxSocketName1031(t)
 	b := uniqueTmuxSocketName1031(t)
