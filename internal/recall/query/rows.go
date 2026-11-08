@@ -20,6 +20,7 @@ const RowsSchema = "agent-deck.recall.rows/v2"
 // command, system, compaction, turn_end, other. IDs are native: Claude
 // `uuid` / `uuid#block`, the tool_use id for a tool row, Codex item or call
 // ids; never line numbers, so they survive tail windows and reconnects.
+// Origin says who produced a user-side row (origin.go).
 type Row struct {
 	ID       string         `json:"id"`
 	Kind     string         `json:"kind,omitempty"`
@@ -32,6 +33,7 @@ type Row struct {
 	Finished *bool          `json:"finished,omitempty"`
 	IsError  *bool          `json:"is_error,omitempty"`
 	Queued   *bool          `json:"queued,omitempty"`
+	Origin   string         `json:"origin,omitempty"`
 	Meta     map[string]any `json:"meta,omitempty"`
 	Children []Row          `json:"children,omitempty"`
 	RawType  string         `json:"raw_type,omitempty"`
@@ -89,6 +91,7 @@ type rowParserState struct {
 	Pending map[string]string `json:"q,omitempty"` // content hash -> queued row id
 	Recent  []string          `json:"r,omitempty"` // hashes of recently absorbed queue content
 	Model   string            `json:"m,omitempty"` // Codex model, for model-change rows
+	Shell   string            `json:"u,omitempty"` // Claude `!` shell row still waiting for its output record
 }
 
 // rowParser maps native lines to row frames for one harness.
@@ -325,13 +328,14 @@ func textRow(id, ts, text string, meta bool) Row {
 
 func (p *rowParser) claudeUser(rec map[string]json.RawMessage, ts, uuid string) []RowFrame {
 	meta := string(rec["isMeta"]) == "true"
+	no := parseNativeOrigin(rec["origin"])
 	msg := timelineObject(rec["message"])
 	content := msg["content"]
 	if string(rec["isCompactSummary"]) == "true" {
-		return []RowFrame{rowFrame(Row{ID: uuid, Kind: "system", TS: ts, Title: "Compaction summary", Body: timelineText(content), RawType: "user"})}
+		return []RowFrame{rowFrame(Row{ID: uuid, Kind: "system", TS: ts, Title: "Compaction summary", Body: timelineText(content), Origin: OriginSystem, RawType: "user"})}
 	}
 	if len(content) > 0 && content[0] == '"' {
-		return p.claudeUserText(uuid, ts, timelineString(content), meta, 0)
+		return p.claudeUserText(uuid, ts, timelineString(content), meta, 0, no)
 	}
 	var out []RowFrame
 	var texts []string
@@ -349,13 +353,33 @@ func (p *rowParser) claudeUser(rec map[string]json.RawMessage, ts, uuid string) 
 		}
 	}
 	if len(texts) > 0 || images > 0 {
-		out = append(p.claudeUserText(uuid, ts, strings.Join(texts, "\n"), meta, images), out...)
+		out = append(p.claudeUserText(uuid, ts, strings.Join(texts, "\n"), meta, images, no), out...)
 	}
 	return out
 }
 
-func (p *rowParser) claudeUserText(uuid, ts, text string, meta bool, images int) []RowFrame {
+func (p *rowParser) claudeUserText(uuid, ts, text string, meta bool, images int, no nativeOrigin) []RowFrame {
+	if isBashInput(text) {
+		row := bashShellRow(uuid, ts, text)
+		p.st.Shell = uuid
+		return []RowFrame{rowFrame(row)}
+	}
+	if isBashOutput(text) {
+		body, isErr := bashShellOutput(text)
+		if id := p.st.Shell; id != "" {
+			p.st.Shell = ""
+			r := resultRow(id, body, isErr)
+			r.Meta["user_shell"] = true
+			return []RowFrame{updateFrame(r)}
+		}
+		// The input record is outside this window or was never written.
+		r := resultRow(uuid, body, isErr)
+		r.Kind, r.TS, r.Title, r.Origin, r.RawType = "bash", ts, firstLine(body, 120), OriginHuman, "user"
+		r.Meta["user_shell"] = true
+		return []RowFrame{rowFrame(r)}
+	}
 	row := textRow(uuid, ts, text, meta)
+	row.Origin = deriveOrigin(row.Kind, text, meta, no)
 	row.RawType = "user"
 	if images > 0 {
 		row.Meta = map[string]any{"images": images}
@@ -536,6 +560,7 @@ func (p *rowParser) claudeQueue(rec map[string]json.RawMessage, ts string) []Row
 		id := "queue:" + ts + ":" + h
 		p.st.Pending[h] = id
 		row := textRow(id, ts, content, false)
+		row.Origin = deriveOrigin(row.Kind, content, false, nativeOrigin{})
 		row.Queued, row.RawType = boolPtr(true), "queue-operation"
 		row.Meta = map[string]any{"delivery": "queued"}
 		return []RowFrame{rowFrame(row)}
@@ -546,6 +571,7 @@ func (p *rowParser) claudeQueue(rec map[string]json.RawMessage, ts string) []Row
 			p.rememberAbsorbed(h)
 			if !ok {
 				row := textRow("queue:"+ts+":"+h, ts, content, false)
+				row.Origin = deriveOrigin(row.Kind, content, false, nativeOrigin{})
 				row.Queued, row.RawType = boolPtr(false), "queue-operation"
 				row.Meta = map[string]any{"delivery": "absorbed"}
 				return []RowFrame{rowFrame(row)}
@@ -575,7 +601,8 @@ func (p *rowParser) claudeAttachment(rec map[string]json.RawMessage, ts, uuid st
 		if p.wasQueued(contentHash(prompt)) {
 			return nil
 		}
-		return []RowFrame{rowFrame(Row{ID: uuid, Kind: "system", TS: ts, Title: systemTitle(prompt), Body: prompt, RawType: "attachment/" + typ})}
+		return []RowFrame{rowFrame(Row{ID: uuid, Kind: "system", TS: ts, Title: systemTitle(prompt), Body: prompt,
+			Origin: deriveOrigin("system", prompt, false, parseNativeOrigin(a["origin"])), RawType: "attachment/" + typ})}
 	}
 	if !claudeSystemAttachments[typ] {
 		return nil
@@ -588,7 +615,7 @@ func (p *rowParser) claudeAttachment(rec map[string]json.RawMessage, ts, uuid st
 	if hook := timelineString(a["hookName"]); hook != "" {
 		title = hook + " · " + typ
 	}
-	return []RowFrame{rowFrame(Row{ID: uuid, Kind: "system", TS: ts, Title: title, Body: text, RawType: "attachment/" + typ})}
+	return []RowFrame{rowFrame(Row{ID: uuid, Kind: "system", TS: ts, Title: title, Body: text, Origin: OriginHook, RawType: "attachment/" + typ})}
 }
 
 func (p *rowParser) claudeSystem(rec map[string]json.RawMessage, ts, uuid string, raw []byte) []RowFrame {
@@ -617,7 +644,7 @@ func (p *rowParser) claudeSystem(rec map[string]json.RawMessage, ts, uuid string
 			return nil
 		}
 		text := strings.Join(parts, "\n")
-		return []RowFrame{rowFrame(Row{ID: uuid, Kind: "system", TS: ts, Title: "Stop hook: " + firstLine(text, 120), Body: text, RawType: rawType})}
+		return []RowFrame{rowFrame(Row{ID: uuid, Kind: "system", TS: ts, Title: "Stop hook: " + firstLine(text, 120), Body: text, Origin: OriginHook, RawType: rawType})}
 	case "compact_boundary":
 		meta := timelineObject(rec["compactMetadata"])
 		var pre, post int64
@@ -636,7 +663,7 @@ func (p *rowParser) claudeSystem(rec map[string]json.RawMessage, ts, uuid string
 		return []RowFrame{rowFrame(Row{ID: uuid, Kind: "compaction", TS: ts, Title: title, RawType: rawType, Meta: m})}
 	case "local_command":
 		text := timelineString(rec["content"])
-		return []RowFrame{rowFrame(Row{ID: uuid, Kind: "command", TS: ts, Title: firstNonEmptyString(commandTitle(text), systemTitle(text)), Body: text, RawType: rawType})}
+		return []RowFrame{rowFrame(Row{ID: uuid, Kind: "command", TS: ts, Title: firstNonEmptyString(commandTitle(text), systemTitle(text)), Body: text, Origin: OriginHuman, RawType: rawType})}
 	case "scheduled_task_fire", "informational", "api_error", "away_summary", "bridge_status":
 		text := firstNonEmptyString(timelineString(rec["content"]), sub)
 		return []RowFrame{rowFrame(Row{ID: uuid, Kind: "system", TS: ts, Title: systemTitle(text), Body: text, RawType: rawType})}
@@ -724,7 +751,7 @@ func (p *rowParser) codexResponseItem(pl map[string]json.RawMessage, ptype, ts, 
 			if codexBoilerplate(text) {
 				return nil
 			}
-			row := Row{ID: codexID(pl, fallbackID), Kind: "user", TS: ts, Body: text, RawType: rawType}
+			row := Row{ID: codexID(pl, fallbackID), Kind: "user", TS: ts, Body: text, Origin: deriveOrigin("user", text, false, nativeOrigin{}), RawType: rawType}
 			images := 0
 			for _, part := range timelineArray(pl["content"]) {
 				if strings.Contains(timelineString(timelineObject(part)["type"]), "image") {
@@ -1038,6 +1065,9 @@ func rowsFromTurns(turns []Turn) []Row {
 			r.Kind = t.Role
 			if r.Kind != "user" && r.Kind != "assistant" {
 				r.Kind = "system"
+			}
+			if r.Kind == "user" {
+				r.Origin = deriveOrigin("user", t.Text, false, nativeOrigin{})
 			}
 		case "tool_call", "permission":
 			r.Kind, r.Title = "tool", t.ToolName
