@@ -96,9 +96,17 @@ func (i *Instance) syncClaudeSessionFromDisk() {
 // UpdateHookStatus updates the instance's hook-based status fields.
 // Called by StatusFileWatcher when a hook status file changes.
 func (i *Instance) UpdateHookStatus(status *HookStatus) {
+	i.updateHookStatus(status)
+}
+
+// updateHookStatus reports whether this observation survived ownership checks.
+// Comparing the retained fields cannot prove acceptance when a rejected hook
+// happens to have the same status/event/timestamp as the preceding observation.
+func (i *Instance) updateHookStatus(status *HookStatus) (accepted bool) {
 	if status == nil {
 		return
 	}
+	accepted = true
 
 	i.mu.Lock()
 	// Issue #1846: whatever hookLastUpdate ends up COMMITTED when this call
@@ -130,6 +138,7 @@ func (i *Instance) UpdateHookStatus(status *HookStatus) {
 	prevInvalidatingGen := i.codexInvalidatingGeneration
 	restoreHook := func() {
 		rejected = true
+		accepted = false
 		i.hookStatus, i.hookEvent, i.hookLastUpdate = prevHookStatus, prevHookEvent, prevHookLastUpdate
 		i.codexStartedGeneration, i.codexCompletedGeneration = prevStartedGen, prevCompletedGen
 		i.codexStartedSessionID, i.codexCompletedSessionID = prevStartedSID, prevCompletedSID
@@ -384,6 +393,7 @@ func (i *Instance) UpdateHookStatus(status *HookStatus) {
 			i.bindGeminiSessionFromHook(sessionID, status.Event)
 		}
 	}
+	return
 }
 
 // bindCodexSessionFromHook is the Codex counterpart of

@@ -1,0 +1,8 @@
+⏺ [REDACTED]
+✻ Waiting for 1 dynamic workflow to finish
+⏺ Dynamic workflow completed
+────────────────────────────────────────
+❯
+────────────────────────────────────────
+  ⏵⏵ bypass permissions on
+  ◯ fixture  ▰▰▰▰  2/2 · 22s

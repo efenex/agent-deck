@@ -1,6 +1,7 @@
 package send
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -53,46 +54,108 @@ type PromptGates struct {
 
 // WaitForAgentReady waits until the agent accepts keyboard input.
 //
-// Primary path: GetStatus active → waiting/idle transition (same as the TUI).
-// Secondary path (#cursor-launch): during tmux's startup window GetStatus can
-// return "starting" without re-capturing the pane when window_activity is flat,
-// even though the tool prompt is already on screen and the user can type.
-// When status is "starting", probe CapturePaneFresh directly for a tool prompt.
+// Real tmux targets use a fresh, deadline-bound readiness snapshot instead of
+// the aggregate TUI status. Startup still requires three consecutive prompt
+// sightings. Background work only permits input with a current empty composer.
 func WaitForAgentReady(target AgentReadyChecker, tool string, timeout time.Duration, gates PromptGates) error {
 	const pollInterval = 200 * time.Millisecond
 	if timeout <= 0 {
 		timeout = DefaultAgentReadyTimeout
 	}
-	maxAttempts := int(timeout / pollInterval)
-	if maxAttempts < 1 {
-		maxAttempts = 1
+	started := time.Now()
+	ctx, cancel := context.WithDeadline(context.Background(), started.Add(timeout))
+	defer cancel()
+	diag := &ReadinessError{Stage: "tmux_readiness", LastStatus: "unknown", LastReason: "no_sample_before_deadline", StatusCounts: map[string]int{}}
+	fail := func() error {
+		diag.ElapsedMS = time.Since(started).Milliseconds()
+		return diag
 	}
-
 	sawActive := false
 	readyCount := 0
 	startupPromptSeen := 0
-
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		time.Sleep(pollInterval)
-
-		status, err := target.GetStatus()
+	for attempt := 0; waitReadyInterval(ctx, pollInterval); attempt++ {
+		// Real tmux targets implement the context-aware probe. The legacy
+		// interface remains for in-memory checkers; their elapsed time is
+		// counted too, and a late successful sample cannot authorize input.
+		var snap tmux.ReadinessSnapshot
+		var err error
+		_, bounded := target.(interface {
+			ProbeReadiness(context.Context) (tmux.ReadinessSnapshot, error)
+		})
+		if probe, ok := target.(interface {
+			ProbeReadiness(context.Context) (tmux.ReadinessSnapshot, error)
+		}); ok {
+			snap, err = probe.ProbeReadiness(ctx)
+		} else {
+			snap.Status, err = target.GetStatus()
+		}
+		if snap.PaneID != "" {
+			diag.PaneID = snap.PaneID
+		}
+		diag.ComposerPresent = nil
 		if err != nil {
-			// A poll that could not read the session is not evidence the
-			// prompt is still up. Only an unbroken run of sightings counts,
-			// so an unreadable poll restarts it rather than carrying it.
+			if snap.Reason == "capture_failed" {
+				diag.CaptureErrors++
+			} else {
+				diag.StatusErrors++
+			}
+			diag.LastReason = err.Error()
 			startupPromptSeen = 0
 			readyCount = 0
 			continue
 		}
-
-		// Startup-window bypass: prompt visible in pane but GetStatus still
-		// "starting" because prompt detection only runs on activity changes.
+		status := snap.Status
+		diag.LastStatus, diag.LastReason = status, snap.Reason
+		diag.LastStatusReason = snap.Reason
+		if diag.LastReason == "" {
+			diag.LastReason = "status_" + status
+		}
+		diag.StatusCounts[status]++
+		if ctx.Err() != nil {
+			return fail()
+		}
+		if status == "inactive" || status == "error" || status == "stopped" {
+			if diag.LastReason == "" {
+				diag.LastReason = "terminal_state"
+			}
+			return fail()
+		}
+		promptReady := true
+		if status == "starting" || gates.ClaudeComposer || gates.CodexPrompt || tool == "cursor" {
+			raw := snap.RawPane
+			if !bounded {
+				raw, err = target.CapturePaneFresh()
+			}
+			if err != nil {
+				diag.CaptureErrors++
+				diag.LastReason = "capture_failed: " + err.Error()
+				readyCount, startupPromptSeen = 0, 0
+				continue
+			}
+			present, reason := readyPrompt(raw, tool, gates)
+			diag.ComposerPresent = &present
+			promptReady = reason == ""
+			if !promptReady {
+				diag.LastReason = reason
+				if reason == ComposerCodeDraft {
+					// Return the same untyped, retryable refusal as the
+					// delivery guard; do not occupy a queue attempt for the
+					// entire readiness timeout behind an operator's draft.
+					return fail()
+				}
+			}
+		}
+		if ctx.Err() != nil {
+			return fail()
+		}
 		if status == "starting" {
-			if paneShowsReadyPrompt(target, tool, gates) {
+			if promptReady {
 				startupPromptSeen++
 				if startupPromptSeen >= startupPromptConfirmations {
-					time.Sleep(300 * time.Millisecond)
-					return nil
+					if waitReadyInterval(ctx, 300*time.Millisecond) {
+						return nil
+					}
+					return fail()
 				}
 				readyCount = 0
 				continue
@@ -108,49 +171,95 @@ func WaitForAgentReady(target AgentReadyChecker, tool string, timeout time.Durat
 		// startup, not a continuation of the run we were counting.
 		startupPromptSeen = 0
 
-		if status == "active" {
+		// Only explicit background evidence plus a current, empty composer
+		// can relax an active pane. A historical prompt never overrides a
+		// foreground spinner, unknown active status, draft or menu.
+		backgroundReady := snap.Reason == "background_work" && gates.ClaudeComposer && promptReady
+		if status == "active" && !backgroundReady {
 			sawActive = true
 			readyCount = 0
 			continue
 		}
 
-		if status == "waiting" || status == "idle" {
+		readyStatus := status == "waiting" || status == "idle" || backgroundReady
+		if readyStatus && promptReady {
 			readyCount++
 		} else {
 			readyCount = 0
 		}
 
 		alreadyReady := readyCount >= 10 && attempt >= 15
-		if (sawActive && (status == "waiting" || status == "idle")) || alreadyReady {
-			if gates.ClaudeComposer {
-				if rawContent, captureErr := target.CapturePaneFresh(); captureErr == nil && !HasCurrentComposerPrompt(tmux.StripANSI(rawContent)) {
-					continue
-				}
+		if promptReady && ((sawActive && readyStatus) || alreadyReady) {
+			if waitReadyInterval(ctx, 300*time.Millisecond) {
+				return nil
 			}
-			if gates.CodexPrompt {
-				if rawContent, captureErr := target.CapturePaneFresh(); captureErr == nil {
-					content := tmux.StripANSI(rawContent)
-					detector := tmux.NewPromptDetector("codex")
-					if !detector.HasPrompt(content) {
-						continue
-					}
-				}
-			}
-			if tool == "cursor" {
-				if rawContent, captureErr := target.CapturePaneFresh(); captureErr == nil {
-					content := tmux.StripANSI(rawContent)
-					detector := tmux.NewPromptDetector("cursor")
-					if !detector.HasPrompt(content) {
-						continue
-					}
-				}
-			}
-			time.Sleep(300 * time.Millisecond)
-			return nil
+			return fail()
 		}
 	}
 
-	return fmt.Errorf("agent not ready after %s", timeout)
+	return fail()
+}
+
+// ReadinessError is safe to include in JSON: it contains no pane or draft text.
+type ReadinessError struct {
+	Stage            string         `json:"stage"`
+	LastStatus       string         `json:"last_status"`
+	LastReason       string         `json:"last_reason"`
+	LastStatusReason string         `json:"last_status_reason"`
+	StatusCounts     map[string]int `json:"status_counts"`
+	StatusErrors     int            `json:"status_errors"`
+	CaptureErrors    int            `json:"capture_errors"`
+	ComposerPresent  *bool          `json:"composer_present"`
+	ElapsedMS        int64          `json:"elapsed_ms"`
+	TargetID         string         `json:"target_id"`
+	PaneID           string         `json:"pane_id"`
+}
+
+func (e *ReadinessError) Error() string {
+	message := "agent not ready"
+	if e.Stage == "defer_foreground" {
+		message = "defer-if-busy: foreground not confirmed idle"
+	}
+	return fmt.Sprintf("%s after %s (stage=%s status=%s reason=%s target=%s pane=%s)",
+		message, time.Duration(e.ElapsedMS)*time.Millisecond, e.Stage, e.LastStatus, e.LastReason, e.TargetID, e.PaneID)
+}
+
+func waitReadyInterval(ctx context.Context, interval time.Duration) bool {
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return ctx.Err() == nil
+	}
+}
+
+func readyPrompt(raw, tool string, gates PromptGates) (bool, string) {
+	content := tmux.StripANSI(raw)
+	if gates.ClaudeComposer {
+		present := currentReadyComposer(content)
+		if !present {
+			return false, ComposerCodeNoPrompt
+		}
+		if tmux.NewPromptDetector("claude").HasErrorBanner(content) {
+			return true, "terminal_error_banner"
+		}
+		return true, ClaudeComposerReady(raw).Code
+	}
+	if gates.CodexPrompt || strings.EqualFold(tool, "codex") {
+		if tmux.NewPromptDetector("codex").HasPrompt(content) {
+			return true, ""
+		}
+		return false, ComposerCodeNoPrompt
+	}
+	if paneLooksBusy(content) {
+		return false, ComposerCodeBusy
+	}
+	if tmux.NewPromptDetector(tool).HasPrompt(content) {
+		return true, ""
+	}
+	return false, ComposerCodeNoPrompt
 }
 
 func paneShowsReadyPrompt(target AgentReadyChecker, tool string, gates PromptGates) bool {
@@ -158,17 +267,42 @@ func paneShowsReadyPrompt(target AgentReadyChecker, tool string, gates PromptGat
 	if err != nil {
 		return false
 	}
-	content := tmux.StripANSI(raw)
-	if gates.CodexPrompt || strings.EqualFold(tool, "codex") {
-		return tmux.NewPromptDetector("codex").HasPrompt(content)
+	_, reason := readyPrompt(raw, tool, gates)
+	return reason == ""
+}
+
+// currentReadyComposer accepts a framed input region at the bottom, or the
+// older bare prompt layout only at the final input line (with its known
+// permissions footer). It intentionally does not use the 40-line historical
+// glyph fallback in CurrentComposerPrompt.
+func currentReadyComposer(content string) bool {
+	lines := strings.Split(strings.TrimRight(content, "\n \t"), "\n")
+	if _, ok := framedComposerPrompt(lines); ok {
+		_, bottom := ComposerBounds(lines)
+		if len(lines)-bottom > 9 {
+			return false
+		}
+		for _, line := range lines[bottom+1:] {
+			if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+				return false
+			}
+		}
+		return true
 	}
-	if paneLooksBusy(content) {
-		return false
+	footerSeen := false
+	for len(lines) > 0 {
+		line := strings.TrimSpace(lines[len(lines)-1])
+		lines = lines[:len(lines)-1]
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "⏵⏵") || line == "? for shortcuts" {
+			footerSeen = true
+			continue
+		}
+		return footerSeen && (strings.HasPrefix(line, "❯") || strings.HasPrefix(line, "›"))
 	}
-	if gates.ClaudeComposer {
-		return HasCurrentComposerPrompt(content)
-	}
-	return tmux.NewPromptDetector(tool).HasPrompt(content)
+	return false
 }
 
 func paneLooksBusy(content string) bool {

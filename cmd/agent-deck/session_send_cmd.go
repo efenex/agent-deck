@@ -21,11 +21,10 @@ import (
 )
 
 // fetchHookDrivenStatus reloads the target from storage and reports the same
-// hook-driven status string that `agent-deck list --json` shows. `session send
-// --defer-if-busy` polls this so its hold gate keys off the turn-finished
-// Stop-hook signal (a true edge) rather than WaitForAgentReady's pane-diff
-// readiness heuristic, which false-positives to idle during tool calls and
-// thinking pauses (#1578).
+// hook-driven status string that `agent-deck list --json` shows. This remains
+// the aggregate busy-capability / completion probe. --defer-if-busy instead
+// uses ReloadForegroundHookStatus and WaitForForegroundReady so background
+// work and a decayed pane heuristic cannot stand in for a foreground edge.
 //
 // It mirrors handleList's status pipeline exactly: reload -> warm caches +
 // cold-load hook files via RefreshInstancesForCLIStatus -> UpdateStatus. The
@@ -365,35 +364,48 @@ func handleSessionSend(profile string, args []string) {
 		exitCLI(1)
 	}
 
-	// #1578: --defer-if-busy holds delivery until the target is turn-finished.
-	// Runs BEFORE WaitForAgentReady + the composer-draft Ctrl+C guard, so a
-	// mid-generation target is never interrupted. Keys off the hook-driven
-	// status (the same turn-finished signal `list --json` reports), not the
-	// pane-diff readiness heuristic that false-positives idle mid-turn.
+	// Hold on fresh foreground evidence before transport delivery. This does
+	// not require a terminal composer when a fresh Stop hook proves waiting.
+	gates := send.PromptGates{ClaudeComposer: session.IsClaudeCompatible(inst.Tool), CodexPrompt: session.IsCodexCompatible(inst.Tool)}
+	foregroundStarted := time.Now()
+	foregroundDeadline := foregroundStarted.Add(*deferTimeout)
+	waitForeground := func() error {
+		remaining := time.Until(foregroundDeadline)
+		if remaining <= 0 {
+			return &send.ReadinessError{Stage: "defer_foreground", LastStatus: "unknown", LastReason: "deadline_exceeded", ElapsedMS: time.Since(foregroundStarted).Milliseconds(), TargetID: inst.ID}
+		}
+		err := send.WaitForForegroundReady(func() (string, bool) {
+			return session.ReloadForegroundHookStatus(inst)
+		}, tmuxSess.ProbeReadiness, inst.Tool, gates, remaining)
+		return identifyReadinessError(err, inst.ID)
+	}
 	if *deferIfBusy {
-		if err := send.WaitUntilNotBusy(func() (string, error) {
-			return fetchHookDrivenStatus(profile, sessionRef)
-		}, *deferTimeout, send.DeferPollInterval, time.Sleep); err != nil {
-			out.Error(err.Error(), ErrCodeInvalidOperation)
+		if err := waitForeground(); err != nil {
+			out.ErrorWithData(err.Error(), ErrCodeInvalidOperation, readinessErrorData(err, inst.ID))
 			exitCLI(1)
 		}
 	}
+	// Resolve before imposing a keyboard gate. performSend revalidates under
+	// the send lock; if the socket disappears, beforeTmux below reinstates
+	// readiness and all keyboard guards before any fallback bytes.
+	sendTransportValue, sendTransportWarn := sendTransportFromConfig()
+	if sendTransportWarn != "" {
+		fmt.Fprintln(os.Stderr, sendTransportWarn)
+	}
+	socketReady, tmuxFallback := planSendReadiness(inst, message, sendTransportValue, *draft || *requireInputPrompt, nil)
 
 	// Wait for agent to be ready (unless --no-wait is specified).
 	// Issue #957: honor --timeout for the readiness phase too, not just the
 	// post-ready completion wait. Otherwise --timeout 5m against a busy
 	// recipient silently fails at ~80s.
-	busyAcceptsInput := !*wait && session.AcceptsInputWhileBusy(inst.Tool)
+	busyAcceptsInput := !socketReady && !tmuxFallback && !*wait && session.AcceptsInputWhileBusy(inst.Tool)
 	if busyAcceptsInput {
 		status, statusErr := fetchHookDrivenStatus(profile, inst.ID)
 		busyAcceptsInput = statusErr == nil && status == "running"
 	}
-	needsReady := !*noWait && !busyAcceptsInput
+	needsReady := (!*noWait || tmuxFallback) && !busyAcceptsInput && !socketReady
 	waitAgentReady := func(d time.Duration) error {
-		return send.WaitForAgentReady(tmuxSess, inst.Tool, d, send.PromptGates{
-			ClaudeComposer: session.IsClaudeCompatible(inst.Tool),
-			CodexPrompt:    session.IsCodexCompatible(inst.Tool),
-		})
+		return identifyReadinessError(send.WaitForAgentReady(tmuxSess, inst.Tool, d, gates), inst.ID)
 	}
 	var acceptanceGuard *codexAcceptanceGuard
 	failReady := func(err error) {
@@ -401,7 +413,12 @@ func handleSessionSend(profile string, args []string) {
 			acceptanceGuard.Release()
 		}
 		telemetry.ErrorOccurred(telemetry.AreaSend, telemetry.KindTimeout, inst.Tool)
-		out.Error(fmt.Sprintf("timeout waiting for agent: %v", err), ErrCodeInvalidOperation)
+		data := readinessErrorData(err, inst.ID)
+		if data["delivery"] == deliveryComposerBlocked {
+			out.ErrorWithData(fmt.Sprintf("agent readiness rejected: %v", err), ErrCodeDeliveryFailed, data)
+		} else {
+			out.ErrorWithData(fmt.Sprintf("timeout waiting for agent: %v", err), ErrCodeInvalidOperation, data)
+		}
 		exitCLI(1)
 	}
 	readyWaited := false
@@ -574,6 +591,19 @@ func handleSessionSend(profile string, args []string) {
 	// Both modes run the composer-draft guard (issue #1409) and submit
 	// verification with a machine-checkable delivery status (issue #1413).
 	tun := sendTuning(*noWait, *requireInputPrompt)
+	if tmuxFallback {
+		// The full wait already ran. Let the final transport selection keep
+		// its fallback reason, then install keyboard guards in runTmuxSend.
+		tun.beforeTmux = func() error { return nil }
+	}
+	if socketReady {
+		tun.beforeTmux = func() error { return waitAgentReady(*timeout) }
+	}
+	if *deferIfBusy {
+		// Re-check after identity setup / lock contention, immediately before
+		// delivery. A fresh running edge must still hold this send.
+		tun.beforeDelivery = waitForeground
+	}
 	if *queueWorker || busyAcceptsInput {
 		// A live Claude composer already exists. Startup preflight and the
 		// 30-check idle-turn probe add delay without proving this queued send.
@@ -608,17 +638,9 @@ func handleSessionSend(profile string, args []string) {
 			exitCLI(1)
 		}
 	}
-	// #2089: pick tmux keystrokes or Claude Code's own messaging socket for
-	// this send. chooseSendTransport is pure and every check it runs happens
-	// strictly before any byte is written, so falling back to tmux here is
-	// indistinguishable from today's behavior on any resolution failure.
-	sendTransportValue, sendTransportWarn := sendTransportFromConfig()
-	if sendTransportWarn != "" {
-		fmt.Fprintln(os.Stderr, sendTransportWarn)
-	}
-	// The busy probe reads the same hook-driven status --defer-if-busy holds
-	// on, so it needs the same lookup closure. performSend only calls it
-	// under --wait, which is the only caller that acts on the answer.
+	// Revalidate transport identity under the send lock. The completion probe
+	// still uses the aggregate status; foreground deferral is supplied above
+	// through beforeDelivery and also runs without --wait.
 	hookStatus := func() (string, error) { return fetchHookDrivenStatus(profile, sessionRef) }
 	// Comms Ledger (P3): the send's receipt is recorded before the action,
 	// its transport outcome after. A queued send is recorded by the queue
@@ -661,6 +683,9 @@ func handleSessionSend(profile string, args []string) {
 		}
 		telemetry.ErrorOccurred(telemetry.AreaSend, telemetry.ErrKindOf(sendErr), inst.Tool)
 		extra := sendRes.jsonFields()
+		for key, value := range readinessErrorData(sendErr, inst.ID) {
+			extra[key] = value
+		}
 		extra["session_id"] = inst.ID
 		extra["session_title"] = inst.Title
 		switch sendRes.delivery {
@@ -1386,6 +1411,8 @@ func (r sendDeliveryResult) jsonFields() map[string]interface{} {
 // tests can shrink them and production paths share one definition.
 type sendExecTuning struct {
 	requireInputPrompt bool
+	beforeTmux         func() error // restores readiness after a socket preflight
+	beforeDelivery     func() error // fresh foreground deferral under the send lock
 	// guardHold bounds the #1409 hold-and-retry phase: how long an automated
 	// send waits for a non-empty operator draft to clear on its own before
 	// refusing delivery while preserving it.

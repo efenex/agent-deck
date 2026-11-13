@@ -92,7 +92,8 @@ func isBareSlashCommand(message string) bool {
 // chooseSendTransport is the pure decision half of the #2089 socket-send
 // feature: given everything relevant about one send, decide tmux or socket,
 // why, and — on a socket decision — the already-vetted target to send to
-// (so callers resolve exactly once per send; see performSend). It never
+// (so callers resolve once per selection; performSend revalidates the early
+// readiness selection under the send lock). It never
 // touches the filesystem or a live process directly — all of that lives
 // behind the resolve seam — which is what makes every branch here
 // table-testable without a real Claude session.
@@ -321,6 +322,13 @@ func performSend(
 	if tun.requireInputPrompt {
 		return runTmuxSend(tmuxTarget, inst, message, noWait, tun, reasonConfigPinnedTmux)
 	}
+	// A foreground wait may outlive the validated socket process or change
+	// the hook-bound session identity. Resolve only after that wait finishes.
+	if tun.beforeDelivery != nil {
+		if err := tun.beforeDelivery(); err != nil {
+			return sendDeliveryResult{delivery: deliveryTargetBusy, untyped: true}, err
+		}
+	}
 	transport, fallbackReason, target := chooseSendTransport(transportInputs{
 		tool:            inst.Tool,
 		configValue:     sendTransportValue,
@@ -333,7 +341,9 @@ func performSend(
 		// Probe only when --wait will act on the answer (see doc comment).
 		probe := busyProbeIdle
 		probed := wait
-		if probed {
+		// Successful foreground deferral just before resolution proves idle
+		// at this boundary; the aggregate probe includes background work.
+		if probed && tun.beforeDelivery == nil {
 			probe = probeTargetBusy(hookStatus, tmuxTarget)
 		}
 		res, err := executeSocketSend(target, message, sendFn)
@@ -361,6 +371,20 @@ func runTmuxSend(
 	tun sendExecTuning,
 	reason send.UnavailableReason,
 ) (sendDeliveryResult, error) {
+	if tun.beforeTmux != nil {
+		if err := tun.beforeTmux(); err != nil {
+			return sendDeliveryResult{delivery: deliveryComposerBlocked, untyped: true, transport: "tmux"}, err
+		}
+		// A socket bypassed the terminal gate. Its fallback must inspect the
+		// current input region at the keystroke boundary as well as waiting.
+		tun.requireInputPrompt = true
+		noWait = false
+	}
+	if tun.beforeDelivery != nil {
+		if err := tun.beforeDelivery(); err != nil {
+			return sendDeliveryResult{delivery: deliveryTargetBusy, untyped: true, transport: "tmux"}, err
+		}
+	}
 	res, err := executeSend(tmuxTarget, inst.Tool, message, noWait, tun)
 	res.transport = "tmux"
 	// Only a genuine "socket was attempted and refused" reason is a fallback
@@ -377,8 +401,7 @@ func runTmuxSend(
 
 // executeSocketSend delivers message to an already-resolved Claude Code
 // messaging-socket target (#2089), bypassing the tmux pane and composer
-// entirely. target comes from chooseSendTransport, which is the only
-// resolve() call for this send (NIT: one resolve per send, not two).
+// entirely. target comes from chooseSendTransport's final, locked selection.
 func executeSocketSend(
 	target send.ClaudeSocketTarget,
 	message string,
