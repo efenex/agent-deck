@@ -1,0 +1,10 @@
+Usage: agent-deck session redeliver <send-id> --request-id K [--check-only] [--json]
+Reconcile late landings; release queued input or reopen a recent untyped failure with a guarded child.
+Typed/submitted sends are only rescanned, never re-sent. Cancelled sends stay cancelled.
+Outcomes: already_landed, landed, pending, refused, blocked_unknown, unsupported, not_found, conflict.
+  -check-only
+    	Inspect eligibility/proof without changing records, binding keys or starting workers
+  -json
+    	Output as JSON
+  -request-id string
+    	Stable operation key (required; reuse it after a lost response)

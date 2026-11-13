@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -221,15 +220,17 @@ func handleSessionSendStatus(profile string, args []string) {
 	fs := flag.NewFlagSet("session send-status", flag.ContinueOnError)
 	fs.SetOutput(os.Stdout)
 	jsonOutput := fs.Bool("json", false, "Output as JSON")
+	noResume := fs.Bool("no-resume", false, "Read the snapshot without starting a worker")
 	fs.Usage = func() {
-		fmt.Println("Usage: agent-deck session send-status <send-id> [--json]")
+		fmt.Println("Usage: agent-deck session send-status <send-id> [--no-resume] [--json]")
 		fmt.Println()
 		fmt.Println("State of a `session send --queue` message: queued, typing, typed, submitted, landed or failed,")
 		fmt.Println("with reason, target_status, attempts, and landed_row_id/landed_at once the text is")
 		fmt.Println("in the transcript (the row id recall timeline/follow use). Exit 0 when found, 2 for an unknown id.")
 		fmt.Println()
 		fmt.Println("landed is reported only on transcript evidence (a user row, or a queued message absorbed")
-		fmt.Println("into the turn). failed means nothing was typed, so resending is safe. A send whose outcome")
+		fmt.Println("into the turn). failed means this send typed nothing; use redeliver to check before reopening it.")
+		fmt.Println("Another send or manual input may already contain the same text. A send whose outcome")
 		fmt.Println("could not be proven settles as typed/submitted (settled: true) and is never typed again.")
 		fs.PrintDefaults()
 	}
@@ -244,6 +245,11 @@ func handleSessionSendStatus(profile string, args []string) {
 		fs.Usage()
 		exitCLI(2)
 	}
+	profile, err := session.ResolveProfileForStorage(profile)
+	if err != nil {
+		out.Error(err.Error(), ErrCodeInvalidOperation)
+		exitCLI(1)
+	}
 	storage, err := session.NewStorageWithProfile(profile)
 	if err != nil {
 		out.Error(err.Error(), ErrCodeInvalidOperation)
@@ -256,7 +262,7 @@ func handleSessionSendStatus(profile string, args []string) {
 		out.Error(fmt.Sprintf("send %s: %v", fs.Arg(0), err), ErrCodeNotFound)
 		exitCLI(2)
 	}
-	if !rec.Final() {
+	if !*noResume && !rec.Final() {
 		// A worker that died (reboot, kill) is restarted by any status read.
 		_ = sendqueue.SpawnWorker(profile, rec.SessionID)
 	}
@@ -484,7 +490,7 @@ func watchQueuedSend(profile, dir, sendID string) {
 		*rec = *r
 		return nil
 	}
-	watchLanded(profile, rec, set)
+	watchLanded(profile, dir, rec, set)
 }
 
 // childOutcome is what a `session send` child's result says happened.
@@ -697,7 +703,12 @@ func deliverQueuedMode(profile, dir string, rec *sendqueue.Record, watch bool) {
 		return
 	}
 	if watch {
-		watchLanded(profile, rec, set)
+		// Synchronous callers must use the same watch lock as detached
+		// watchers and explicit redelivery reconciliation.
+		watchQueuedSend(profile, dir, rec.SendID)
+		if current, err := sendqueue.Load(dir, rec.SendID); err == nil {
+			*rec = *current
+		}
 	}
 }
 
@@ -910,7 +921,7 @@ func reconcileTyping(dir string, rec *sendqueue.Record, set func(func(*sendqueue
 // transcript, then for the target to take the turn up, so the next queued
 // message is not typed into this one's turn. Without evidence it settles
 // typed/submitted with a reason: never landed, and never typed again.
-func watchLanded(profile string, rec *sendqueue.Record, set func(func(*sendqueue.Record)) error) {
+func watchLanded(profile, dir string, rec *sendqueue.Record, set func(func(*sendqueue.Record)) error) {
 	harness := rowsHarness(rec.Tool)
 	if !query.SupportsDirectRows(harness) {
 		_ = set(func(r *sendqueue.Record) {
@@ -921,7 +932,6 @@ func watchLanded(profile string, rec *sendqueue.Record, set func(func(*sendqueue
 		})
 		return
 	}
-	sentAt, _ := time.Parse(time.RFC3339Nano, rec.SentAt)
 	landBy := time.Now().Add(sendLandWindow())
 	for time.Now().Before(landBy) {
 		if rec.TranscriptPath == "" {
@@ -930,13 +940,7 @@ func watchLanded(profile string, rec *sendqueue.Record, set func(func(*sendqueue
 			}
 		}
 		if rec.TranscriptPath != "" {
-			if id, ts, ok := query.FindLanded(context.Background(), harness, rec.TranscriptPath, rec.TranscriptFrom, rec.Message, sentAt); ok {
-				_ = set(func(r *sendqueue.Record) {
-					r.State, r.Reason, r.Verdict, r.LandedRowID, r.LandedAt = sendqueue.StateLanded, "", "delivered", id, ts
-					if sid := claudeSessionIDFromTranscript(harness, r.TranscriptPath); sid != "" {
-						r.ClaudeSessionID = sid
-					}
-				})
+			if d, err := reconcileSendProof(profile, dir, rec, false); err == nil && (d.Outcome == "landed" || d.Outcome == "already_landed") {
 				waitTurnStarted(profile, rec.SessionID, 5*time.Second)
 				return
 			}

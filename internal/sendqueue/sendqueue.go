@@ -25,7 +25,8 @@ import (
 	"time"
 )
 
-// States of a queued send, in order. failed is terminal like landed.
+// States of a queued send, in order. failed is terminal for the worker;
+// an explicit guarded redelivery may reopen it after checking eligibility.
 const (
 	StateQueued    = "queued"    // waiting for the target to be idle
 	StateTyping    = "typing"    // handed to `session send`; outcome not known yet
@@ -83,7 +84,9 @@ type Record struct {
 	UpdatedAt          string   `json:"updated_at"`
 	Deadline           string   `json:"deadline"`
 	Attempts           int      `json:"attempts"`
-	SentAt             string   `json:"sent_at,omitempty"`
+	// Redeliveries counts explicit failed-to-queued reopens; Attempts is never reset.
+	Redeliveries int    `json:"redeliveries,omitempty"`
+	SentAt       string `json:"sent_at,omitempty"`
 	// Sender is who queued the send: the calling session's id, or "cli".
 	// The delivering child journals it as the send's sender.
 	Sender string `json:"sender,omitempty"`
@@ -228,20 +231,16 @@ func validID(id string) bool {
 	return true
 }
 
-// Save writes a record atomically.
+// Save writes and fsyncs a record through a unique temporary file and rename.
 func Save(dir string, r *Record) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
+	if !validID(r.SendID) {
+		return ErrUnknown
 	}
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(dir, "."+r.SendID+".tmp")
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(dir, r.SendID+".json"))
+	return writeFileAtomic(filepath.Join(dir, r.SendID+".json"), b)
 }
 
 // ErrUnknown is returned for a send id with no record.
@@ -328,18 +327,45 @@ func Prune(dir string, cutoff time.Time) {
 		if !r.Final() || err != nil || !t.Before(cutoff) {
 			continue
 		}
-		_ = os.Remove(ResultPath(dir, r.SendID))
-		_ = os.Remove(ControlPath(dir, r.SendID))
-		_ = os.Remove(ControlResultPath(dir, r.SendID))
-		_ = os.Remove(filepath.Join(dir, r.SendID+".message"))
-		_ = os.Remove(filepath.Join(dir, r.SendID+".json"))
-		if r.Key != "" {
-			// The key goes with its record: the same key queues anew after.
-			if b, err := os.ReadFile(KeyPath(dir, r.Key)); err == nil && strings.TrimSpace(string(b)) == r.SendID {
-				_ = os.Remove(KeyPath(dir, r.Key))
-			}
+		pruneRecord(dir, r.SendID, cutoff)
+	}
+}
+
+func pruneRecord(dir, id string, cutoff time.Time) {
+	lock, ok, err := TryRecordLock(dir, id)
+	if err != nil || !ok {
+		return // a reopen/reconciliation owns it; a later prune can retry
+	}
+	defer func() { _ = lock.Release() }()
+	r, err := Load(dir, id)
+	if err != nil {
+		return
+	}
+	t, err := time.Parse(time.RFC3339Nano, r.UpdatedAt)
+	if !r.Final() || err != nil || !t.Before(cutoff) {
+		return // List's snapshot may predate a failed-to-queued reopen
+	}
+	_ = os.Remove(ResultPath(dir, r.SendID))
+	_ = os.Remove(ControlPath(dir, r.SendID))
+	_ = os.Remove(ControlResultPath(dir, r.SendID))
+	_ = os.Remove(filepath.Join(dir, r.SendID+".message"))
+	_ = os.Remove(filepath.Join(dir, r.SendID+".json"))
+	if r.Key != "" {
+		// The key goes with its record: the same key queues anew after.
+		if b, err := os.ReadFile(KeyPath(dir, r.Key)); err == nil && strings.TrimSpace(string(b)) == r.SendID {
+			_ = os.Remove(KeyPath(dir, r.Key))
 		}
 	}
+}
+
+// TryRecordLock serializes failed reopens, late reconciliation and Prune.
+// It does not replace the existing worker/watch locks for active records.
+// Lock files are never unlinked: doing so could create two independent flocks.
+func TryRecordLock(dir, id string) (*Lock, bool, error) {
+	if !validID(id) {
+		return nil, false, ErrUnknown
+	}
+	return TryLock(dir, "record-"+id)
 }
 
 // Lock is a held per-target worker lock.

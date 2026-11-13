@@ -107,6 +107,8 @@ func handleSession(profile string, args []string) {
 		handleSessionRef(profile, args[1:])
 	case "send-status":
 		handleSessionSendStatus(profile, args[1:])
+	case "redeliver":
+		handleSessionRedeliver(profile, args[1:])
 	case "queue":
 		handleSessionQueue(profile, args[1:])
 	case "send-worker":
@@ -180,6 +182,7 @@ func printSessionHelp() {
 	fmt.Println("  command [id] \"/cmd ...\"  Run a Claude slash command (/model, /compact, /clear, /exit, skills) and verify the outcome")
 	fmt.Println("  commands [id]           List the slash commands and skills a Claude session can run (--json)")
 	fmt.Println("  send-status <send-id>   State of a queued send: queued, typed, submitted, landed or failed")
+	fmt.Println("  redeliver <send-id>     Reconcile or safely reopen a send (--request-id K --json)")
 	fmt.Println("  queue list <session>    List durable queued sends (--json)")
 	fmt.Println("  queue release <id>      Send a queued entry now, with confirmed delivery evidence (--json)")
 	fmt.Println("  queue cancel <id>       Cancel an unsent entry or report its delivery (--json)")

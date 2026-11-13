@@ -171,16 +171,42 @@ func lockFile(path string) (func(), error) {
 	}, nil
 }
 
-// writeFileAtomic writes b to path through a temporary file and a rename.
+// writeFileAtomic durably publishes b. Unique temp names keep concurrent
+// writers from renaming one another's incomplete files.
 func writeFileAtomic(path string, b []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	defer os.Remove(f.Name())
+	if _, err = f.Write(b); err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(f.Name(), path); err != nil {
+		return err
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	if err := errors.Join(dir.Sync(), dir.Close()); err != nil {
+		return err
+	}
+	// Persist a newly created keys/ or sendqueue/ directory entry too.
+	parent, err := os.Open(filepath.Dir(filepath.Dir(path)))
+	if err != nil {
+		return err
+	}
+	return errors.Join(parent.Sync(), parent.Close())
 }
 
 // PublishState mirrors a queued send's state on the bus so a client

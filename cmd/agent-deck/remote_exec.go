@@ -32,7 +32,7 @@ func remoteCommandArgs(args []string) ([]string, error) {
 		case "session":
 			if len(args) > 1 {
 				switch args[1] {
-				case "show", "output", "send", "send-status", "image-upload", "start", "stop", "restart", "fork", "archive", "unarchive", "set", "context", "metrics", "viewers", "annotate":
+				case "show", "output", "send", "send-status", "redeliver", "image-upload", "start", "stop", "restart", "fork", "archive", "unarchive", "set", "context", "metrics", "viewers", "annotate":
 					return append([]string(nil), args...), nil
 				case "queue":
 					if remoteQueueArgs(args) {
@@ -392,10 +392,10 @@ func runRemoteExec(name string, args []string) (int, error) {
 	var stdout io.Writer = os.Stdout
 	var stderr io.Writer = os.Stderr
 	var capturedOut, capturedErr bytes.Buffer
-	if isSessionMetricsArgs(args) || isSessionPrimerArgs(args) || isSessionAnnotateArgs(args) || isRecallArgs(args) || isRemoteLimitsArgs(args) || isSessionQueueArgs(args) {
+	if isSessionMetricsArgs(args) || isSessionPrimerArgs(args) || isSessionAnnotateArgs(args) || isRecallArgs(args) || isRemoteLimitsArgs(args) || isSessionQueueArgs(args) || isSessionRedeliverArgs(args) {
 		stderr = &capturedErr
 	}
-	if isSessionAnnotateArgs(args) || isRecallArgs(args) || isRemoteLimitsArgs(args) || isSessionQueueArgs(args) {
+	if isSessionAnnotateArgs(args) || isRecallArgs(args) || isRemoteLimitsArgs(args) || isSessionQueueArgs(args) || isSessionRedeliverArgs(args) {
 		stdout = &capturedOut
 	}
 	if !remoteForwardNeedsStdin(args) {
@@ -408,6 +408,13 @@ func runRemoteExec(name string, args []string) (int, error) {
 	var exitErr *exec.ExitError
 	remoteFailed := errors.As(err, &exitErr) && exitErr.ExitCode() > 0
 	if remoteFailed {
+		if isSessionRedeliverArgs(args) && strings.Contains(capturedErr.String(), "unknown session command: redeliver") {
+			if wantsJSON(args) {
+				fmt.Fprintln(os.Stdout, `{"outcome":"unsupported","reason":"remote_redeliver_unavailable"}`)
+				return 0, nil
+			}
+			return 1, fmt.Errorf("session redeliver is unsupported on remote %q", name)
+		}
 		if msg, ok := remoteMetricsUnsupported(name, args, exitErr.ExitCode(), capturedErr.String()); ok {
 			return 2, errors.New(msg)
 		}

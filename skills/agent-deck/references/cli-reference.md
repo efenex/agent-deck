@@ -542,6 +542,26 @@ With `--wait` or `--stream` on a Claude target, the reply is bound to the transc
 
 Claude conversation identity (additive; Claude-compatible targets only, other tools' receipts are unchanged): `--json` receipts carry `claude_session_id`, the native Claude conversation the message went to (the same value `session show --json` and `session output --json` report), omitted while it is not known yet (a fresh session before Claude writes its transcript). The queued `--json` receipt and `session send-status --json` carry it too; once the send has `landed` it names the conversation whose transcript holds `landed_row_id`. A `--json --wait` reply bound to its transcript record also carries `claude_turn_uuid`, the uuid of that user record, and `claude_session_id` from the same record; it is the Claude counterpart of Codex's `accepted_turn.codex_session_id` + `codex_turn_generation`.
 
+### session redeliver
+
+```bash
+agent-deck session redeliver <send-id> --request-id K [--check-only] --json
+agent-deck session send-status <send-id> --no-resume --json
+agent-deck remote <owner> session redeliver <send-id> --request-id K --json
+```
+
+Reuse one request key after a timeout: it returns the stored decision plus a
+current snapshot; using it for another send conflicts. Landed and cancelled
+sends never emit again. Queued sends use queue release; typing joins; typed or
+submitted sends only receive a bounded rescan, including after settling.
+Failed sends may reopen under the same ID within one hour by default, after
+running-target, budget and current-transcript content-presence checks. Reopened
+sends use the guarded tmux child and keep their attempt count and queue position.
+`[send] redeliver_max_age` configures the age limit. OpenCode, shell and local SSH
+placeholders are unsupported. `--check-only` has no delivery/key side effects;
+`--no-resume` makes status omit its usual worker restart. See
+[redelivery outcomes and limits](../../../docs/redeliver.md).
+
 ### session ref
 
 ```bash

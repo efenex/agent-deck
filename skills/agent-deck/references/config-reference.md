@@ -1193,11 +1193,13 @@ Tunes `agent-deck session send` (comms redesign PR5).
 ```toml
 [send]
 tag_sends = true   # prefix agent-originated sends with [agent-deck from:<id>]
+redeliver_max_age = "1h"  # maximum age from created_at for failed-send reopening
 ```
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `tag_sends` | bool | `true` | A `session send` from inside an agent-deck session (`AGENTDECK_INSTANCE_ID` set) to a Claude target starts with one `[agent-deck from:<sender-id>]` line, so the receiver's reply is classified as a send and, when the sender is not the receiver's parent, committed to the sender's inbox as an urgent `reply` record that wakes it (also when the receiver has no parent). `false` turns tagging off for every send (`--no-tag` does it per send). Human shells, senders that are not Claude-compatible sessions, `--draft`, bare slash commands, heartbeats, sends to oneself and non-Claude targets are never tagged. |
+| `redeliver_max_age` | duration string | `"1h"` | Maximum age from `created_at` for `session redeliver` to reopen a `failed` send. Positive Go durations such as `"30m"` or `"2h"`; invalid/nonpositive values disable reopening. Does not authorize re-emission of typed/submitted sends. Content-presence, running-target, budget and input-prompt checks still apply. |
 
 ## [costs.budgets] and [costs.run_budget]
 
@@ -1205,7 +1207,9 @@ tag_sends = true   # prefix agent-originated sends with [agent-deck from:<id>]
 `enforce = true` they also gate agent-initiated sends and wakes (`session send` (and so goal nudges, conductor heartbeats, inbox wakes, `--queue`, the queued send worker and `session queue release`), `launch -m`, `session start -m`, the "continue" an MCP `--restart` types, and the TUI's own conductor-pane deliveries (the heartbeat after a clear-on-compact, watcher health alerts)): one aimed at a target whose session, group or global limit is spent is refused before
 anything is typed, with code `BUDGET_EXCEEDED` and a `session.budget_exceeded` event
 (see the costs section of cli-reference.md). Messages a person starts (chat bridges, web
-Command Center, any send with `--ignore-budget`) are never blocked. A group limit applies
+Command Center, any send with `--ignore-budget`) are never blocked on their initial send.
+An explicit `session redeliver` reopening always reapplies the budget gate, including
+for a record originally queued with `--ignore-budget`. A group limit applies
 to the sessions whose group path equals the key exactly; subgroups are not included. `[costs.run_budget]` holds the per-run
 defaults every new goal (`skills/agent-deck/scripts/goal/goal.sh`) starts with; the
 goal manager stops the run and its worker when one is spent, before it wakes the
