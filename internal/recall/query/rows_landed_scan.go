@@ -14,10 +14,14 @@ const LandedScanBytes int64 = 4 << 20
 
 // LandedWindow restricts a scan to [From, To) and a timestamp interval.
 // To < 0 means the current EOF. MaxBytes <= 0 uses LandedScanBytes.
+// PeerEnvelope also accepts a Claude peer envelope around the text. Set it
+// for a send delivered over Claude's socket, or when any copy of the text
+// counts (a presence check); never as proof for a send typed into the pane.
 type LandedWindow struct {
 	From, To            int64
 	NotBefore, NotAfter time.Time
 	MaxBytes            int64
+	PeerEnvelope        bool
 }
 
 // LandedCandidate contains no transcript content.
@@ -99,7 +103,7 @@ func ScanLanded(ctx context.Context, harness, path, text string, w LandedWindow)
 			return nil
 		}
 		for _, fr := range p.line(line) {
-			if fr.Row != nil && fr.Frame == "row" && landedMatch(fr.Row, want) {
+			if fr.Row != nil && fr.Frame == "row" && landedMatchPeer(fr.Row, want, w.PeerEnvelope) {
 				if _, err := time.Parse(time.RFC3339Nano, fr.Row.TS); err != nil {
 					result.Complete, result.Reason = false, "source_timestamp"
 				}
@@ -114,7 +118,7 @@ func ScanLanded(ctx context.Context, harness, path, text string, w LandedWindow)
 				if fresh(fr.Row.TS) {
 					matches[fr.Row.ID] = LandedCandidate{ID: fr.Row.ID, TS: fr.Row.TS}
 				}
-			case fr.Frame != "row" || !landedMatch(fr.Row, want):
+			case fr.Frame != "row" || !landedMatchPeer(fr.Row, want, w.PeerEnvelope):
 			case fresh(fr.Row.TS):
 				if fr.Row.Queued != nil && *fr.Row.Queued {
 					pending[fr.Row.ID] = true

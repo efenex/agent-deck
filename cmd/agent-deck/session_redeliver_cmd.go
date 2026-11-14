@@ -309,7 +309,7 @@ func reopenFailedSend(profile, dir string, rec *sendqueue.Record, inst *session.
 	defer cancel()
 	path := session.LiveTranscriptPath(inst, instances)
 	presence := query.ScanLanded(ctx, rowsHarness(inst.Tool), path, rec.Message,
-		query.LandedWindow{To: -1, NotBefore: created})
+		query.LandedWindow{To: -1, NotBefore: created, PeerEnvelope: true})
 	if presence.Present {
 		return answer("blocked_unknown", "content_present")
 	}
@@ -383,6 +383,15 @@ func landedRowClaimed(records []*sendqueue.Record, rec *sendqueue.Record, row st
 	return false
 }
 
+// sentOverSocket reports whether the delivering child wrote the send to
+// Claude's socket. Only then can a peer envelope row be this send's: a
+// guarded send is always typed into the pane, and a record without its
+// child's evidence proves nothing either way.
+func sentOverSocket(rec *sendqueue.Record) bool {
+	transport, _ := rec.DeliveryEvidence["transport"].(string)
+	return !rec.RequireInputPrompt && transport == "socket"
+}
+
 func boundedSendProof(dir string, rec *sendqueue.Record) (query.LandedCandidate, string) {
 	var none query.LandedCandidate
 	sent, err := time.Parse(time.RFC3339Nano, rec.SentAt)
@@ -411,7 +420,7 @@ func boundedSendProof(dir string, rec *sendqueue.Record) (query.LandedCandidate,
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	scan := query.ScanLanded(ctx, rowsHarness(rec.Tool), rec.TranscriptPath, rec.Message,
-		query.LandedWindow{From: rec.TranscriptFrom, To: to, NotBefore: sent, NotAfter: sent.Add(redeliverProofWindow)})
+		query.LandedWindow{From: rec.TranscriptFrom, To: to, NotBefore: sent, NotAfter: sent.Add(redeliverProofWindow), PeerEnvelope: sentOverSocket(rec)})
 	if !scan.Complete {
 		return none, scan.Reason
 	}

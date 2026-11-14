@@ -36,9 +36,14 @@ func TestR1SocketUserFixtures(t *testing.T) {
 			if !ok || id != row.ID {
 				t.Error("socket user did not prove landing")
 			}
-			scan := ScanLanded(context.Background(), "claude", path, want, LandedWindow{To: -1, NotBefore: at, NotAfter: at.Add(time.Minute)})
+			scan := ScanLanded(context.Background(), "claude", path, want, LandedWindow{To: -1, NotBefore: at, NotAfter: at.Add(time.Minute), PeerEnvelope: true})
 			if !scan.Complete || scan.Pending || len(scan.Candidates) != 1 || scan.Candidates[0].ID != row.ID {
 				t.Errorf("bounded scan: %+v", scan)
+			}
+			// A send typed into the pane never produces this row.
+			typed := ScanLanded(context.Background(), "claude", path, want, LandedWindow{To: -1, NotBefore: at, NotAfter: at.Add(time.Minute)})
+			if !typed.Complete || typed.Present || len(typed.Candidates) != 0 {
+				t.Errorf("envelope proved a pane send: %+v", typed)
 			}
 		})
 	}
