@@ -2696,7 +2696,12 @@ func (r *SSHRunner) buildAttachArgs(sessionID string) []string {
 
 // sshAttachArgs is the ssh argv that runs an agent-deck command on a remote PTY.
 func (r *SSHRunner) sshAttachArgs(args ...string) []string {
-	remoteCmd := "env TERM=" + shellQuote(remoteAttachTERM()) + " " + r.buildRemoteCommand(args...)
+	remoteCmd := "env TERM=" + shellQuote(remoteAttachTERM())
+	// SSH does not normally forward COLORTERM; tmux needs it to retain RGB.
+	if colorTerm := localTruecolor(); colorTerm != "" {
+		remoteCmd += " COLORTERM=" + shellQuote(colorTerm)
+	}
+	remoteCmd += " " + r.buildRemoteCommand(args...)
 	sshArgs := append([]string{"-tt"}, r.sshConnOpts()...)
 	return append(sshArgs, r.Host, remoteCmd)
 }
@@ -2712,12 +2717,25 @@ func (r *SSHRunner) moshAttachArgs(args ...string) []string {
 // Retain portable terminal types and use the common 256-color entry otherwise.
 func remoteAttachTERM() string {
 	terminal := os.Getenv("TERM")
+	// Bare xterm is 8 colours; a truecolor terminal can do 256, and tmux
+	// before 3.6 ignores COLORTERM, so only TERM can say so.
+	if terminal == "xterm" && localTruecolor() != "" {
+		return "xterm-256color"
+	}
 	switch terminal {
 	case "xterm", "xterm-256color", "screen", "screen-256color", "tmux", "tmux-256color", "linux", "vt100", "ansi", "dumb":
 		return terminal
 	default:
 		return "xterm-256color"
 	}
+}
+
+// localTruecolor is the local COLORTERM when it claims 24-bit colour, else "".
+func localTruecolor() string {
+	if c := os.Getenv("COLORTERM"); c == "truecolor" || c == "24bit" {
+		return c
+	}
+	return ""
 }
 
 // CreateSession creates and starts a quick new session on the remote, returning its ID.

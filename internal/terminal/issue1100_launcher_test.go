@@ -39,9 +39,7 @@ func TestIssue1100_BuildAttachCommand_RemoteSession(t *testing.T) {
 		" -o ControlPath='" + perUserControlPath() + "'",
 		" -o ControlPersist=600",
 		"'user@server.example'",
-		"'/usr/local/bin/agent-deck'",
-		"-p 'work'",
-		"session attach 'abc-123'",
+		shellQuote("env TERM='xterm-256color' COLORTERM='truecolor' '/usr/local/bin/agent-deck' -p 'work' session attach 'abc-123'"),
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("remote BuildAttachCommand missing %q\nfull:\n%s", want, got)
@@ -61,10 +59,10 @@ func TestIssue1100_BuildAttachCommand_RemoteDefaultProfileOmitsFlag(t *testing.T
 			Profile: "default",
 		},
 	})
-	if strings.Contains(got, "-p 'default'") {
+	if strings.Contains(got, "-p ") {
 		t.Errorf("remote command should not pass -p 'default' explicitly:\n%s", got)
 	}
-	if !strings.Contains(got, "session attach 'abc-123'") {
+	if !strings.Contains(got, shellQuote("env TERM='xterm-256color' COLORTERM='truecolor' 'agent-deck' session attach 'abc-123'")) {
 		t.Errorf("remote command must still attach to the session id:\n%s", got)
 	}
 }
