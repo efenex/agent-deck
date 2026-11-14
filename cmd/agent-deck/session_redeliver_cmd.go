@@ -345,7 +345,7 @@ func reopenFailedSend(profile, dir string, rec *sendqueue.Record, inst *session.
 // not enough: an older identical send that was itself reopened (or is still
 // queued) types after rec was created. An unparseable time counts as a copy.
 func knownCopy(other, rec *sendqueue.Record, created time.Time) bool {
-	if other.SendID == rec.SendID || other.SessionID != rec.SessionID || other.Message != rec.Message ||
+	if other.SendID == rec.SendID || other.SessionID != rec.SessionID || normalizedSendText(other.Message) != normalizedSendText(rec.Message) ||
 		other.State == sendqueue.StateFailed || other.State == sendqueue.StateCancelled {
 		return false
 	}
@@ -363,6 +363,9 @@ func knownCopy(other, rec *sendqueue.Record, created time.Time) bool {
 	}
 	return false
 }
+
+// normalizedSendText folds whitespace the way transcript matching does.
+func normalizedSendText(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // redeliverProofWindow also caps ordinary watchers: a later identical input
 // must never retroactively prove an older lost send.
@@ -394,10 +397,10 @@ func boundedSendProof(dir string, rec *sendqueue.Record) (query.LandedCandidate,
 	// A different-text send is no fence: the worker types it without waiting
 	// for this proof, so a mid-turn queued message is absorbed after it.
 	to := int64(-1)
-	want := strings.Join(strings.Fields(rec.Message), " ")
+	want := normalizedSendText(rec.Message)
 	for _, other := range records {
 		if other.SendID == rec.SendID || other.SessionID != rec.SessionID || other.TranscriptPath != rec.TranscriptPath || other.TranscriptFrom < rec.TranscriptFrom ||
-			strings.Join(strings.Fields(other.Message), " ") != want {
+			normalizedSendText(other.Message) != want {
 			continue
 		}
 		next, err := time.Parse(time.RFC3339Nano, other.SentAt)

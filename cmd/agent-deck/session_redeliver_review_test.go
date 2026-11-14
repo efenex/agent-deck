@@ -1,16 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/asheshgoplani/agent-deck/internal/recall/query"
 	"github.com/asheshgoplani/agent-deck/internal/sendqueue"
 )
 
 // An agent resends a failed send under a new ID and the resend fails too.
+// Whitespace-only differences are the same text to the transcript matcher.
 // Reopening the older one and then the newer one must not queue both: that
 // would type the same text twice into one transcript.
 func TestRedeliverIdenticalFailedPairReopensOnce(t *testing.T) {
@@ -85,6 +88,10 @@ func TestLateAbsorptionAfterNextDifferentSendStillLands(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The pre-R0 watcher's matcher proves this fixture; R0 must not lose it.
+	if _, _, ok := query.FindLanded(context.Background(), "claude", f.path, 0, a.Message, sent); !ok {
+		t.Fatal("fixture: base FindLanded does not prove the absorbed send")
+	}
 	got := f.run(t, a, "late", false)
 	if got.Outcome != "landed" {
 		t.Fatalf("absorbed send not proven past a different send's offset: %+v", got)
@@ -94,7 +101,7 @@ func TestLateAbsorptionAfterNextDifferentSendStillLands(t *testing.T) {
 // A failed reopen's presence scan covers created_at..now. A long-lived Claude
 // transcript is usually larger than the 4 MiB scan bound even when the last
 // hour is small. Report-only: fail-closed, but D3 reopens become unreachable.
-func TestReviewReopenPresenceOnLargeTranscript(t *testing.T) {
+func TestRedeliverReopenPresenceOnLargeTranscriptBlocks(t *testing.T) {
 	f := newRedeliverFixture(t, true)
 	old := claudeUserLine("old", strings.Repeat("x", 1024), f.now.Add(-48*time.Hour))
 	var sb strings.Builder
@@ -106,7 +113,10 @@ func TestReviewReopenPresenceOnLargeTranscript(t *testing.T) {
 	}
 	r := f.record(t, sendqueue.StateFailed)
 	got := f.run(t, r, "big", false)
-	t.Logf("REVIEW large-transcript reopen: %+v", got.RedeliveryDecision)
+	// Documents a known limit: fail-closed, never a reopen without coverage.
+	if got.Outcome != "blocked_unknown" || got.Reason != "scan_limit" {
+		t.Fatalf("large-transcript reopen: %+v", got.RedeliveryDecision)
+	}
 }
 
 // Two identical failed sends reopened concurrently under different keys hold
@@ -143,5 +153,18 @@ func TestRedeliverIdenticalFailedPairConcurrentReopensOnce(t *testing.T) {
 			rec.State = sendqueue.StateCancelled
 			_ = sendqueue.Save(f.dir, rec)
 		}
+	}
+}
+
+func TestRedeliverKnownCopyIgnoresWhitespace(t *testing.T) {
+	f := newRedeliverFixture(t, true)
+	pending := f.record(t, sendqueue.StateQueued)
+	pending.Message = "  [REDACTED]\n"
+	if err := sendqueue.Save(f.dir, pending); err != nil {
+		t.Fatal(err)
+	}
+	failed := f.record(t, sendqueue.StateFailed)
+	if got := f.run(t, failed, "ws", false); got.Reason != "content_present" {
+		t.Fatalf("whitespace variant not treated as a copy: %+v", got)
 	}
 }
