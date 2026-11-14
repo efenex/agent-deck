@@ -300,6 +300,9 @@ func TestConductorRecoveryExplicitMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Readiness requires a current input region, not a bare historical glyph.
+	// Give this launch fixture Claude's framed empty composer and footer.
+	script = []byte(strings.ReplaceAll(string(script), "❯ ", "────────────────────\\n❯ \\n────────────────────\\n  ⏵⏵ bypass permissions on"))
 	if err := os.WriteFile(inst.Command, []byte(strings.ReplaceAll(string(script), "\\033[H", "\\033[40;1H")), 0700); err != nil {
 		t.Fatal(err)
 	}

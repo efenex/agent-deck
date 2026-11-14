@@ -80,6 +80,23 @@ func ReloadHookStatus(inst *Instance) {
 	}
 }
 
+// ReloadForegroundHookStatus requires an on-disk observation on this poll.
+// ReloadHookStatus intentionally preserves its cache on a missing file; a
+// sender must not interpret that retained value as a newly observed idle turn.
+func ReloadForegroundHookStatus(inst *Instance) (string, bool) {
+	if inst == nil {
+		return "", false
+	}
+	hs := readHookStatusFile(inst.ID)
+	if hs == nil || hs.UpdatedAt.After(time.Now().Add(time.Second)) {
+		return "", false
+	}
+	if !inst.updateHookStatus(hs) {
+		return "", false // rejected by the existing ownership checks
+	}
+	return inst.GetHookStatus()
+}
+
 // primeCLIStatusCaptures batches the pane captures of the instances a status
 // pass is about to read (tmux.PrimePaneCaptures).
 func primeCLIStatusCaptures(instances []*Instance) {
