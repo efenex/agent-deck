@@ -122,6 +122,56 @@ func TestReadinessDraftRefusesPromptly(t *testing.T) {
 	}
 }
 
+// A Claude hook older than the 2m freshness window is the normal state of an
+// idle target woken on a 20m cadence. With no foreground-busy evidence in the
+// pane, --defer-if-busy must not hold on composer shape: a validated socket
+// send needs no composer, and keyboard delivery applies its own guards.
+func TestForegroundStaleHookIdlePaneDoesNotRequireComposer(t *testing.T) {
+	for name, snap := range map[string]tmux.ReadinessSnapshot{
+		"draft":           {Status: "waiting", Reason: "no_busy_indicator", RawPane: "────────────────────\n❯ operator draft\n────────────────────"},
+		"no composer":     {Status: "waiting", Reason: "no_busy_indicator", RawPane: "⏺ done\nunrecognised layout"},
+		"background work": {Status: "active", Reason: "background_work", RawPane: "⏺ done\nunrecognised layout"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := WaitForForegroundReady(func() (string, bool) { return "waiting", false },
+				func(context.Context) (tmux.ReadinessSnapshot, error) { return snap, nil },
+				"claude", PromptGates{ClaudeComposer: true}, time.Second)
+			if err != nil {
+				t.Fatalf("stale hook + idle pane held: %v", err)
+			}
+		})
+	}
+}
+
+// The same stale hook still holds on a running turn the send-side detector
+// sees even when the tmux classifier did not (status waiting).
+func TestForegroundStaleHookHoldsOnRunningTurnLine(t *testing.T) {
+	raw, err := os.ReadFile("testdata/readiness/foreground-busy.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = WaitForForegroundReady(func() (string, bool) { return "waiting", false },
+		func(context.Context) (tmux.ReadinessSnapshot, error) {
+			return tmux.ReadinessSnapshot{Status: "waiting", Reason: "no_busy_indicator", RawPane: string(raw)}, nil
+		}, "claude", PromptGates{ClaudeComposer: true}, 100*time.Millisecond)
+	var diagnostic *ReadinessError
+	if !errors.As(err, &diagnostic) || diagnostic.LastReason != ComposerCodeBusy {
+		t.Fatalf("running turn line did not hold: %v", err)
+	}
+}
+
+// Scripts classify a deferral timeout from the error text by matching
+// "defer-if-busy:" and "still busy"; the structured diagnostics must not drop
+// the phrase WaitUntilNotBusy used.
+func TestForegroundDeferErrorKeepsStillBusyPhrase(t *testing.T) {
+	err := WaitForForegroundReady(func() (string, bool) { return "running", true },
+		func(context.Context) (tmux.ReadinessSnapshot, error) { return tmux.ReadinessSnapshot{}, nil },
+		"claude", PromptGates{ClaudeComposer: true}, 50*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "defer-if-busy:") || !strings.Contains(err.Error(), "still busy") {
+		t.Fatalf("deferral error text = %v", err)
+	}
+}
+
 func TestForegroundRunningAndUnknownHold(t *testing.T) {
 	for _, fresh := range []bool{true, false} {
 		start := time.Now()

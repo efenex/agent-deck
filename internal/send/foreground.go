@@ -9,7 +9,9 @@ import (
 
 // WaitForForegroundReady uses freshly reloaded turn hooks, not the aggregate
 // session status (which includes background work). Without a fresh hook it
-// requires positive current input-region evidence. Unknown never means idle.
+// reads a fresh pane and holds on foreground-busy evidence, startup, or an
+// unreadable pane; background work alone does not hold. It never requires a
+// composer: keyboard delivery applies its own composer, draft and menu guards.
 // probe must honor ctx; the real tmux implementation uses bounded subprocesses.
 func WaitForForegroundReady(
 	hook func() (string, bool),
@@ -42,11 +44,17 @@ func WaitForForegroundReady(
 				}
 				diag.LastReason = err.Error()
 			} else if status != "inactive" && status != "error" && status != "starting" {
+				// This stage decides only "is a foreground turn running". It
+				// holds on positive foreground evidence (busy spinner/title, a
+				// running-turn line); composer, draft and menu checks belong
+				// to keyboard delivery (WaitForAgentReady, beforeTmux and the
+				// executeSend guards), which a validated socket send skips.
 				present, reason := readyPrompt(snap.RawPane, tool, gates)
 				diag.ComposerPresent = &present
-				ready = reason == "" && (status == "waiting" || status == "idle" || snap.Reason == "background_work")
-				if reason != "" {
-					diag.LastReason = reason
+				busy := reason == ComposerCodeBusy || (gates.ClaudeComposer && ClaudeTurnRunning(snap.RawPane))
+				ready = !busy && (status == "waiting" || status == "idle" || snap.Reason == "background_work")
+				if busy {
+					diag.LastReason = ComposerCodeBusy
 				}
 			}
 		}

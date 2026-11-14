@@ -218,7 +218,9 @@ type ReadinessError struct {
 func (e *ReadinessError) Error() string {
 	message := "agent not ready"
 	if e.Stage == "defer_foreground" {
-		message = "defer-if-busy: foreground not confirmed idle"
+		// Keep the pre-diagnostics phrase: callers classify a deferral
+		// timeout by "defer-if-busy:" + "still busy" in the error text.
+		message = "defer-if-busy: target still busy (" + e.LastStatus + ")"
 	}
 	return fmt.Sprintf("%s after %s (stage=%s status=%s reason=%s target=%s pane=%s)",
 		message, time.Duration(e.ElapsedMS)*time.Millisecond, e.Stage, e.LastStatus, e.LastReason, e.TargetID, e.PaneID)

@@ -9,9 +9,14 @@ means `queued_socket`, not proof that Claude processed the message.
 
 `--defer-if-busy` waits for a fresh foreground turn signal. Each hook observation
 is reloaded from disk and goes through the existing session ownership checks.
-Missing, stale, implausibly future-dated or rejected hooks do not become idle evidence; the
-fallback requires a fresh pane with a current input region. The signal is checked
-again at delivery. Background work remains visible in global session status.
+Missing, stale (older than the hook freshness window, 2 minutes for Claude),
+implausibly future-dated or rejected hooks do not become idle evidence; the
+fallback reads a fresh pane and holds on foreground-busy evidence (spinner,
+working title, running-turn line), startup, a terminal state or an unreadable
+pane. Background work alone does not hold. This stage never requires a
+composer: keyboard delivery applies its own composer, draft and menu guards,
+and a validated socket send needs none. The signal is checked again at
+delivery. Background work remains visible in global session status.
 
 A socket refusal before any write restores full terminal readiness, draft and
 menu guards before fallback bytes, including after an early socket validation
