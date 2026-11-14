@@ -29,6 +29,7 @@ errors exit 1. A connection failure is not proof that nothing was sent.
 
 Failed reopening requires a running matching deck session, available cost
 budget, readable current native transcript with no matching content since
+creation, no other tracked send of the same text still queued or typed since
 creation, and an age of at most one hour by default. Configure
 `[send] redeliver_max_age = "1h"`; invalid/nonpositive values disable reopening.
 Claude and Codex are supported. A restarted native conversation of the same
@@ -36,8 +37,8 @@ harness is allowed. Reopening keeps attempts, increments `redeliveries`, renews
 the 30-minute queue deadline and forces the guarded tmux child. It may run ahead
 of newer sends because its original ULID retains its sort position.
 
-Proof scans are bounded to 4 MiB and three seconds, the next send's offset when
-known, and ten minutes after `sent_at`. Already claimed rows and several
+Proof scans are bounded to 4 MiB and three seconds, the offset of the next send
+of the same text when known, and ten minutes after `sent_at`. Already claimed rows and several
 matching rows report `blocked_unknown/content_present`. Incomplete or unreadable
 coverage also blocks. Check again with a new key for a later landing. Legacy
 landed records sharing a row remain suppressive with `shared_landed_row`.

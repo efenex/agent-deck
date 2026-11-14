@@ -44,7 +44,8 @@ reloads, and rechecks finality and retention before deleting. Lock files are
 not unlinked, avoiding split-lock inodes.
 
 Proof scans read at most 4 MiB, with a three-second deadline, from the saved
-offset through the next send's offset to the same target/source (when known),
+offset through the offset of the next send of the same text to the same
+target/source (when known; a different-text send is no fence),
 and accept rows no later than `sent_at + 10 minutes`. The existing two-second
 clock skew applies to the lower bound. A row already claimed by another
 retained record is rejected. Several candidates or pending identical input

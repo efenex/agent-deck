@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/asheshgoplani/agent-deck/internal/costs"
@@ -252,6 +253,17 @@ func reopenFailedSend(profile, dir string, rec *sendqueue.Record, inst *session.
 			return answer("pending", "record_busy")
 		}
 		defer releaseQueueLock(lock)
+		// Reopens of different send IDs to one target serialize their
+		// known-copy check and Save: two identical failed sends reopened
+		// concurrently must not both see the other as failed and both queue.
+		reopen, ok, err := sendqueue.TryLock(dir, "reopen-"+rec.SessionID)
+		if err != nil {
+			return sendqueue.RedeliveryDecision{}, "", err
+		}
+		if !ok {
+			return answer("pending", "reopen_busy")
+		}
+		defer releaseQueueLock(reopen)
 		current, err := sendqueue.Load(dir, rec.SendID)
 		if errors.Is(err, sendqueue.ErrUnknown) {
 			return answer("not_found", "send_not_found")
@@ -289,10 +301,7 @@ func reopenFailedSend(profile, dir string, rec *sendqueue.Record, inst *session.
 		return answer("blocked_unknown", "proof_records_unreadable")
 	}
 	for _, other := range records {
-		at, err := time.Parse(time.RFC3339Nano, other.CreatedAt)
-		if other.SendID != rec.SendID && other.SessionID == rec.SessionID && other.Message == rec.Message &&
-			other.State != sendqueue.StateFailed && other.State != sendqueue.StateCancelled &&
-			err == nil && !at.Before(created) {
+		if knownCopy(other, rec, created) {
 			return answer("blocked_unknown", "content_present")
 		}
 	}
@@ -331,6 +340,30 @@ func reopenFailedSend(profile, dir string, rec *sendqueue.Record, inst *session.
 	return redeliveryDecision("pending", "reopened"), rec.SessionID, nil
 }
 
+// knownCopy reports whether other is a tracked copy of rec's text that may
+// still be typed, or was typed after rec was created. Creation order alone is
+// not enough: an older identical send that was itself reopened (or is still
+// queued) types after rec was created. An unparseable time counts as a copy.
+func knownCopy(other, rec *sendqueue.Record, created time.Time) bool {
+	if other.SendID == rec.SendID || other.SessionID != rec.SessionID || other.Message != rec.Message ||
+		other.State == sendqueue.StateFailed || other.State == sendqueue.StateCancelled {
+		return false
+	}
+	if other.State == sendqueue.StateQueued || other.State == sendqueue.StateTyping {
+		return true
+	}
+	for _, ts := range []string{other.CreatedAt, other.SentAt} {
+		if ts == "" {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, ts)
+		if err != nil || !at.Before(created) {
+			return true
+		}
+	}
+	return false
+}
+
 // redeliverProofWindow also caps ordinary watchers: a later identical input
 // must never retroactively prove an older lost send.
 const redeliverProofWindow = 10 * time.Minute
@@ -357,9 +390,14 @@ func boundedSendProof(dir string, rec *sendqueue.Record) (query.LandedCandidate,
 	if err != nil {
 		return none, "proof_records_unreadable"
 	}
+	// Only a later send of the same text can be confused with this one's row.
+	// A different-text send is no fence: the worker types it without waiting
+	// for this proof, so a mid-turn queued message is absorbed after it.
 	to := int64(-1)
+	want := strings.Join(strings.Fields(rec.Message), " ")
 	for _, other := range records {
-		if other.SendID == rec.SendID || other.SessionID != rec.SessionID || other.TranscriptPath != rec.TranscriptPath || other.TranscriptFrom < rec.TranscriptFrom {
+		if other.SendID == rec.SendID || other.SessionID != rec.SessionID || other.TranscriptPath != rec.TranscriptPath || other.TranscriptFrom < rec.TranscriptFrom ||
+			strings.Join(strings.Fields(other.Message), " ") != want {
 			continue
 		}
 		next, err := time.Parse(time.RFC3339Nano, other.SentAt)
