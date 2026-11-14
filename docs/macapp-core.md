@@ -59,8 +59,8 @@ file) takes it from there:
    go back to `queued` and are retried. Anything else (`menu_open`, a
    readiness timeout, `no_evidence`, a crash) may have typed the text: the
    record stays `typed` with `reason: "outcome unknown (…)"` and the
-   transcript decides. It is never `failed`, because a client that resends
-   on `failed` would double the message.
+   transcript decides. It is never `failed`: that state means this send typed
+   nothing, although another send or a human may already have copied it.
 4. A separate watcher checks the native transcript from the byte offset before the
    send until the text lands: state `landed` with `landed_row_id`, the same
    id `recall timeline`/`follow` give that row. Only delivery counts: a user
@@ -69,7 +69,10 @@ file) takes it from there:
    a row stamped before the send is an earlier message, never this one. The
    typing worker can submit later queued sends while the first message is
    still waiting for its turn. The watcher is locked per send and can be
-   restarted after a process exit without retyping.
+   restarted after a process exit without retyping. Row claims are exclusive
+   among retained sends; several candidates, incomplete scans or a later
+   send's offset block attribution. `session redeliver` can rescan settled
+   sends without input; see [redelivery](redeliver.md).
 5. The retry budget is 30 minutes (`deadline`), then `failed` with a reason
    (only ever when nothing was typed). A refusal before typing
    (`composer_blocked`, `target_busy`) is retried after a wait that doubles
@@ -89,7 +92,7 @@ ever types a record that has left `queued`.
 Send ids sort in send order, also for callers in the same millisecond.
 Each state or verdict change is also a `session.send` bus frame and, in a running
 `recall follow` for that session, a `{"frame":"delivery","send_id","state","verdict"}`
-line. `send-status`, `events follow` and `recall follow` restart the worker
+line. `send-status` (unless `--no-resume`), `events follow` and `recall follow` restart the worker
 for a send that is still in flight (after a reboot, say). Finished records
 are pruned after 7 days. Exit codes: 0 queued or sent, 1 delivery failed,
 2 usage error, unknown session, unknown send id or unsupported image.

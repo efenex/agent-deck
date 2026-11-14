@@ -220,6 +220,6 @@ func notifySenderOfFailedSend(profile string, r *sendqueue.Record) bool {
 		ToStatus:       "send_failed",
 		Timestamp:      time.Now(),
 		LastOutputHash: "send:" + r.SendID,
-		Text:           fmt.Sprintf("Your queued send %s to '%s' was not delivered: %s. Nothing was typed, so resending is safe.", r.SendID, title, r.Reason),
+		Text:           fmt.Sprintf("Your queued send %s to '%s' was not delivered: %s. This send typed nothing. Use session redeliver with its send ID and a stable --request-id to check before reopening; another send or manual input may already contain the same text.", r.SendID, title, r.Reason),
 	}) == nil
 }

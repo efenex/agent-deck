@@ -2421,6 +2421,23 @@ type SendSettings struct {
 	// one "[agent-deck from:<sender-id>]" line so the receiver's reply is
 	// routed back to the sender (comms redesign PR5). Default true (nil).
 	TagSends *bool `toml:"tag_sends,omitempty"`
+	// RedeliverMaxAge bounds failed-send reopening from created_at. Positive
+	// Go durations (e.g. "30m", "1h") are valid; default "1h". An invalid or
+	// nonpositive value disables reopening, never removes the age limit.
+	RedeliverMaxAge string `toml:"redeliver_max_age,omitempty"`
+}
+
+// GetRedeliverMaxAge returns the failed-reopen age limit, or zero for an
+// invalid explicit setting (fail closed).
+func (c *UserConfig) GetRedeliverMaxAge() time.Duration {
+	if c == nil || c.Send.RedeliverMaxAge == "" {
+		return time.Hour
+	}
+	d, err := time.ParseDuration(c.Send.RedeliverMaxAge)
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
 }
 
 // GetTagSends reports whether `session send` tags agent-originated sends.

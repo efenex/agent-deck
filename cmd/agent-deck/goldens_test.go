@@ -88,6 +88,7 @@ var excludedCommands = []excludedCommand{
 	{"session stop", "stops a real tmux process; covered instead by the storage-bytes goldens (deliverable 2)"},
 	{"session restart", "restarts a real tmux process; covered instead by the storage-bytes goldens (deliverable 2)"},
 	{"session fork", "spawns a new tmux session"},
+	{"session redeliver", "may reopen a failed send or release queued input; covered by isolated redelivery tests"},
 	{"session attach", "requires an interactive TTY attach to tmux"},
 	{"fleet recover", "mutates the store (kills/relaunches sessions)"},
 	{"group create", "mutates the store"},
@@ -300,7 +301,7 @@ func helpSpecs() []goldenSpec {
 		"costs daily", "costs sessions", "costs models", "costs groups", "costs budgets",
 		"file bundle",
 		// Probed by clients (the macOS app) for feature detection.
-		"session image-upload", "session send-status", "session queue",
+		"session image-upload", "session send-status", "session redeliver", "session queue",
 		"usage statusline", "recall timeline", "recall follow",
 		"events follow", "events publish",
 		"triggers list", "triggers scan", "triggers mute", "triggers unmute", "triggers run", "triggers fires",

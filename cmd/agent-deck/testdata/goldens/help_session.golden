@@ -32,6 +32,7 @@ Commands:
   command [id] "/cmd ..."  Run a Claude slash command (/model, /compact, /clear, /exit, skills) and verify the outcome
   commands [id]           List the slash commands and skills a Claude session can run (--json)
   send-status <send-id>   State of a queued send: queued, typed, submitted, landed or failed
+  redeliver <send-id>     Reconcile or safely reopen a send (--request-id K --json)
   queue list <session>    List durable queued sends (--json)
   queue release <id>      Send a queued entry now, with confirmed delivery evidence (--json)
   queue cancel <id>       Cancel an unsent entry or report its delivery (--json)
