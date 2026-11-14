@@ -1,11 +1,40 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/asheshgoplani/agent-deck/internal/sendqueue"
+	"github.com/asheshgoplani/agent-deck/internal/session"
+)
+
+// childEvidence is what a queue child leaves in DeliveryEvidence for res:
+// the `session send --json` success payload, read back from its result file.
+func childEvidence(t *testing.T, res *sendDeliveryResult) map[string]interface{} {
+	t.Helper()
+	if res == nil {
+		return nil
+	}
+	inst := session.NewInstanceWithTool("evidence-target", t.TempDir(), "claude")
+	b, err := json.Marshal(sendSuccessData(inst, "[REDACTED]", *res, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var evidence map[string]interface{}
+	if err := json.Unmarshal(b, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if outcome, _ := classifyChild(evidence, 0); outcome != childTyped && outcome != childSubmitted {
+		t.Fatalf("child evidence classified %v", outcome)
+	}
+	return evidence
+}
+
+var (
+	socketChild = &sendDeliveryResult{delivery: deliveryQueuedSocket, transport: "socket", socketMsgID: "synthetic-msg"}
+	tmuxChild   = &sendDeliveryResult{delivery: deliveryDelivered, transport: "tmux"}
 )
 
 // A send typed into the pane never produces a Claude peer envelope. An
@@ -18,23 +47,23 @@ func TestRedeliverPeerEnvelopeProvesOnlySocketSends(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name     string
-		guarded  bool
-		evidence map[string]interface{}
-		outcome  string
+		name    string
+		guarded bool
+		child   *sendDeliveryResult
+		outcome string
 	}{
-		{"guarded phone send", true, map[string]interface{}{"transport": "tmux"}, "blocked_unknown"},
+		{"guarded phone send", true, tmuxChild, "blocked_unknown"},
 		{"guarded without evidence", true, nil, "blocked_unknown"},
-		{"unguarded tmux send", false, map[string]interface{}{"transport": "tmux"}, "blocked_unknown"},
+		{"unguarded tmux send", false, tmuxChild, "blocked_unknown"},
 		{"unguarded without evidence", false, nil, "blocked_unknown"},
-		{"guarded claiming socket", true, map[string]interface{}{"transport": "socket"}, "blocked_unknown"},
-		{"socket send", false, map[string]interface{}{"transport": "socket"}, "landed"},
+		{"guarded claiming socket", true, socketChild, "blocked_unknown"},
+		{"socket send", false, socketChild, "landed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newRedeliverFixture(t, false)
 			r := f.record(t, sendqueue.StateTyped)
 			r.SentAt, r.Settled = "2026-11-14T08:00:00Z", true
-			r.RequireInputPrompt, r.DeliveryEvidence = tc.guarded, tc.evidence
+			r.RequireInputPrompt, r.DeliveryEvidence = tc.guarded, childEvidence(t, tc.child)
 			if err := os.WriteFile(f.path, b, 0600); err != nil {
 				t.Fatal(err)
 			}

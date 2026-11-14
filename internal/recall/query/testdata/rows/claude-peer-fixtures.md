@@ -51,3 +51,12 @@ the embedded tag. The matcher test decodes that JSON into the current Row,
 which ignores the fork-only origin field, then requires complete envelope and
 full-message equality. No fork branch was merged, and no origin field or
 serialized-recall input adapter was added to the native transcript parser.
+
+## Transport gate
+
+An envelope row proves only a send whose delivering child reported
+`transport: socket` and that was not guarded (`--require-input-prompt` is
+always typed into the pane). `LandedWindow.PeerEnvelope` carries that choice;
+the failed-reopen presence check keeps envelopes on, where any copy blocks.
+`cmd/agent-deck/session_redeliver_transport_test.go` builds the evidence from
+`sendSuccessData`, the payload the queue child writes.

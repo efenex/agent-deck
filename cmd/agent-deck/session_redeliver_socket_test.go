@@ -39,7 +39,7 @@ func TestR1SocketRedeliverCLI(t *testing.T) {
 			}
 			rec.State, rec.Settled, rec.Tool = sendqueue.StateTyped, true, "claude"
 			rec.SentAt, rec.Message = "2026-11-14T08:00:00Z", message
-			rec.DeliveryEvidence = map[string]interface{}{"transport": "socket"}
+			rec.DeliveryEvidence = childEvidence(t, socketChild)
 			rec.TranscriptPath = filepath.Join(home, "synthetic.jsonl")
 			if err := os.WriteFile(rec.TranscriptPath, b, 0600); err != nil {
 				t.Fatal(err)
@@ -70,7 +70,7 @@ func TestR1SocketProofGuards(t *testing.T) {
 			f := newRedeliverFixture(t, false)
 			r := f.record(t, sendqueue.StateTyped)
 			r.SentAt, r.Settled = at.Format(time.RFC3339Nano), true
-			r.DeliveryEvidence = map[string]interface{}{"transport": "socket"}
+			r.DeliveryEvidence = childEvidence(t, socketChild)
 			data := append([]byte(nil), b...)
 			switch mode {
 			case "claimed":
