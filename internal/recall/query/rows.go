@@ -251,6 +251,9 @@ func (p *rowParser) claude(rec map[string]json.RawMessage, raw []byte) []RowFram
 // command, or an injection that the terminal shows as a faint line.
 func claudeUserTextKind(text string, meta bool) string {
 	t := strings.TrimSpace(text)
+	if _, ok := claudePeerText(t); ok {
+		return "user"
+	}
 	switch {
 	case strings.HasPrefix(t, "<command-name>"), strings.HasPrefix(t, "<command-message>"):
 		return "command"

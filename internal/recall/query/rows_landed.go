@@ -78,19 +78,48 @@ func FindLanded(ctx context.Context, harness, path string, from int64, text stri
 	return id, ts, ok
 }
 
-// landedMatch reports whether a row carries the sent text.
+// landedMatch reports whether a row carries the sent text, a Claude peer
+// envelope included. FindLanded uses it; ScanLanded decides per send.
 func landedMatch(r *Row, want string) bool {
+	return landedMatchPeer(r, want, true)
+}
+
+// landedMatchPeer is landedMatch with the peer envelope optional. Only a send
+// that went over Claude's socket produces an envelope row: for a send typed
+// into the pane, an envelope with the same text is another session's message.
+func landedMatchPeer(r *Row, want string, peer bool) bool {
 	switch r.Kind {
 	case "user":
 		if normalizeLanded(r.Body) == want {
 			return true
 		}
 		unwrapped, ok := UnwrapPastedContent(r.Body)
-		return ok && normalizeLanded(unwrapped) == want
+		if ok && normalizeLanded(unwrapped) == want {
+			return true
+		}
+		if peer && (r.RawType == "user" || r.RawType == "queue-operation") {
+			return landedPeerMatch(unwrapped, want)
+		}
+	case "system":
+		// The recall-origin fork serializes meta peer user rows as system
+		// rows. Keep that compatibility narrow: native user text only, with
+		// its normal title (not a compaction summary), and a full envelope.
+		if peer && r.RawType == "user" && r.Title == systemTitle(r.Body) {
+			return landedPeerMatch(r.Body, want)
+		}
 	case "command":
 		return strings.HasPrefix(want, "/") && normalizeLanded(r.Title) == want
 	}
 	return false
+}
+
+func landedPeerMatch(body, want string) bool {
+	text, ok := claudePeerText(body)
+	if !ok {
+		return false
+	}
+	text, _ = UnwrapPastedContent(text)
+	return normalizeLanded(text) == want
 }
 
 // normalizeLanded compares messages the way the terminal shows them:
