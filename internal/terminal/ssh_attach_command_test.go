@@ -33,6 +33,7 @@ exec /bin/sh -c "$*"
 		{"unset", "", "capture", "work", "session"},
 		{"odd", "odd'; exit 99; #", "capture", "work", "session"},
 		{"quoted", "", "capture ' executable", "profile ' quoted", "session ' quoted"},
+		{"metachar", "", "capture $(touch PWNED)", "profile `touch PWNED`", "session;$HOME\\*"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			executable := filepath.Join(dir, tc.executable)
