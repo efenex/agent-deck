@@ -2696,7 +2696,12 @@ func (r *SSHRunner) buildAttachArgs(sessionID string) []string {
 
 // sshAttachArgs is the ssh argv that runs an agent-deck command on a remote PTY.
 func (r *SSHRunner) sshAttachArgs(args ...string) []string {
-	remoteCmd := "env TERM=" + shellQuote(remoteAttachTERM()) + " " + r.buildRemoteCommand(args...)
+	remoteCmd := "env TERM=" + shellQuote(remoteAttachTERM())
+	// SSH does not normally forward COLORTERM; tmux needs it to retain RGB.
+	if colorTerm := os.Getenv("COLORTERM"); colorTerm == "truecolor" || colorTerm == "24bit" {
+		remoteCmd += " COLORTERM=" + shellQuote(colorTerm)
+	}
+	remoteCmd += " " + r.buildRemoteCommand(args...)
 	sshArgs := append([]string{"-tt"}, r.sshConnOpts()...)
 	return append(sshArgs, r.Host, remoteCmd)
 }

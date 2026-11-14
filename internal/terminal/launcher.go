@@ -232,10 +232,8 @@ func BuildAttachCommand(req AttachRequest) string {
 // session.SSHRunner.buildRemoteCommand so the user lands in the same
 // session regardless of which path opened it.
 //
-// We rely on ssh's documented behavior of joining trailing args with
-// spaces before sending them to the remote shell, so each piece only
-// needs to be locally shell-safe — no nested re-quoting of the whole
-// command string.
+// The remote command is quoted for both the local shell and the remote
+// shell that ssh invokes.
 func buildRemoteAttachCommand(remoteName string, r *RemoteAttach) string {
 	host := strings.TrimSpace(r.Host)
 	if host == "" {
@@ -282,6 +280,14 @@ func buildRemoteAttachCommand(remoteName string, r *RemoteAttach) string {
 
 // buildRemoteSSHAttachCommand is the ssh command line for a remote attach.
 func buildRemoteSSHAttachCommand(host, agentDeckPath, profile, remoteName, sshConfig string) string {
+	// Match embeddedTerminalEnv: advertise the embedded emulator, and send
+	// its color capability explicitly rather than relying on SSH SendEnv.
+	remoteCmd := "env TERM='xterm-256color' COLORTERM='truecolor' " + shellQuote(agentDeckPath)
+	if profile != "" && profile != "default" {
+		remoteCmd += " -p " + shellQuote(profile)
+	}
+	remoteCmd += " session attach " + shellQuote(remoteName)
+
 	// ssh with -tt (force remote PTY) and the same ControlMaster flags
 	// as the in-TUI remote attach, so the multiplexed connection is
 	// reused.
@@ -295,13 +301,7 @@ func buildRemoteSSHAttachCommand(host, agentDeckPath, profile, remoteName, sshCo
 	b.WriteString(" ")
 	b.WriteString(shellQuote(host))
 	b.WriteString(" ")
-	b.WriteString(shellQuote(agentDeckPath))
-	if profile != "" && profile != "default" {
-		b.WriteString(" -p ")
-		b.WriteString(shellQuote(profile))
-	}
-	b.WriteString(" session attach ")
-	b.WriteString(shellQuote(remoteName))
+	b.WriteString(shellQuote(remoteCmd))
 	return b.String()
 }
 
