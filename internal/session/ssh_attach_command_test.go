@@ -77,3 +77,22 @@ func TestSSHAttachCOLORTERM(t *testing.T) {
 		})
 	}
 }
+
+// A truecolor terminal that reports bare xterm (8 colours) attaches as
+// xterm-256color, since tmux before 3.6 ignores COLORTERM.
+func TestRemoteAttachTERMBareXterm(t *testing.T) {
+	for _, tc := range []struct{ term, colorTerm, want string }{
+		{"xterm", "truecolor", "xterm-256color"},
+		{"xterm", "24bit", "xterm-256color"},
+		{"xterm", "", "xterm"},
+		{"xterm", "odd", "xterm"},
+		{"screen", "truecolor", "screen"},
+		{"linux", "truecolor", "linux"},
+	} {
+		t.Setenv("TERM", tc.term)
+		t.Setenv("COLORTERM", tc.colorTerm)
+		if got := remoteAttachTERM(); got != tc.want {
+			t.Errorf("TERM=%q COLORTERM=%q: remoteAttachTERM() = %q, want %q", tc.term, tc.colorTerm, got, tc.want)
+		}
+	}
+}
