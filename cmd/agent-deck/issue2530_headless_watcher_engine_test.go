@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -44,6 +45,14 @@ func newIssue2530Env(t *testing.T) *issue2530Env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	// The shell wrappers use pwd -P. Match their physical paths on macOS too,
+	// where TMPDIR can contain symlinked /var or /tmp components.
+	physicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root = physicalRoot
 	e := &issue2530Env{t: t, bin: channelsCLIBinary(t), root: root}
 	for _, d := range []string{"home", "config", "data", "cache", "state", "run", "tmux", "proj"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
@@ -75,9 +84,51 @@ func newIssue2530Env(t *testing.T) *issue2530Env {
 		kill := exec.Command("tmux", "kill-server")
 		kill.Env = e.env
 		_ = kill.Run()
-		_ = os.RemoveAll(root)
+		e.reapFakeClaude()
 	})
 	return e
+}
+
+// reapFakeClaude also catches wrappers and Python children that survived a
+// pane's hangup or lost their tmux parent. /proc is unavailable on macOS, so
+// use portable ps output and require this fixture's unique absolute root.
+// Wait for termination before the earlier cleanup removes the fixture files.
+func (e *issue2530Env) reapFakeClaude() {
+	e.t.Helper()
+	owned := regexp.MustCompile(`(?:^|\s)` + regexp.QuoteMeta(e.root) +
+		`/(?:fakebin/claude|[^\n]*?/\.fake/claude)(?:\s|$)`)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		out, err := exec.Command("ps", "-axww", "-o", "pid=,stat=,args=").Output()
+		if err != nil {
+			e.t.Errorf("list fake Claude processes for cleanup: %v", err)
+			return
+		}
+		var pids []int
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 3 || strings.HasPrefix(fields[1], "Z") || !owned.MatchString(line) {
+				continue
+			}
+			pid, err := strconv.Atoi(fields[0])
+			if err == nil && pid > 1 && pid != os.Getpid() {
+				pids = append(pids, pid)
+			}
+		}
+		if len(pids) == 0 {
+			return
+		}
+		for _, pid := range pids {
+			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+				e.t.Errorf("kill fake Claude pid %d: %v", pid, err)
+			}
+		}
+		if time.Now().After(deadline) {
+			e.t.Errorf("fake Claude processes survived cleanup: %v", pids)
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // cli runs one agent-deck command on the env's profile and returns its output.
