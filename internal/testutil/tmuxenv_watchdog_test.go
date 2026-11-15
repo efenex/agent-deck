@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -159,7 +160,11 @@ func TestTmuxWatchdog_RefusesNonIsolatedDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(notOurs) })
-	for _, dir := range []string{"/tmp", "/private/tmp", t.TempDir(), notOurs} {
+	dirs := []string{"/tmp", t.TempDir(), notOurs}
+	if runtime.GOOS == "darwin" {
+		dirs = append(dirs, "/private/tmp")
+	}
+	for _, dir := range dirs {
 		stop := startTmuxDirWatchdog(dir)
 		stop()
 		stop = ReapHomeOnExit(dir)
