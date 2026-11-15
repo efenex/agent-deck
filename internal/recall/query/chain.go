@@ -169,7 +169,6 @@ func ReadChainRows(ctx context.Context, harness string, segs []ChainSegment, opt
 		oldestPage = page
 		need -= len(page.Turns)
 		if !exhausted || need <= 0 || i == 0 {
-			k = i
 			break
 		}
 		i--
