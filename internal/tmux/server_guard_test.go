@@ -430,13 +430,21 @@ func TestServerGuard_MassVanishAfterSocketRecreatedHeld(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer l1.Close()
+	oldInode := socketInode(path)
 	observeSocketIdentityAt(path)
-	_ = l1.Close()
+	// Keep the old inode allocated: unlinking it lets Linux reuse it for l2.
+	if err := os.Rename(path, path+".old"); err != nil {
+		t.Fatal(err)
+	}
 	l2, err := net.Listen("unix", path) // new server, new socket file
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer l2.Close()
+	if socketInode(path) == oldInode {
+		t.Fatal("replacement socket must have a distinct inode")
+	}
 	// The raw listener speaks no tmux protocol; answer the holder probe here.
 	prevSessions := sessionsAtPath
 	sessionsAtPath = func(string) (int, []string, error) { return 0, nil, errors.New("not tmux") }
