@@ -121,7 +121,7 @@ func (s *Session) CapturePane() (string, error) {
 			slog.String("session", s.TmuxName()))
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		cmd := s.tmuxCmdContext(ctx, "capture-pane", "-t", s.TmuxName(), "-p", "-e")
+		cmd := s.tmuxCmdContext(ctx, "capture-pane", "-t", s.primaryWindowTarget(), "-p", "-e")
 		output, err := commandOutput(cmd)
 		finish()
 		if err != nil {
@@ -162,7 +162,7 @@ func (s *Session) CapturePaneFresh() (string, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	cmd := s.tmuxCmdContext(ctx, "capture-pane", "-t", s.TmuxName(), "-p", "-e")
+	cmd := s.tmuxCmdContext(ctx, "capture-pane", "-t", s.primaryWindowTarget(), "-p", "-e")
 	output, err := commandOutput(cmd)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -213,7 +213,7 @@ func (s *Session) CaptureFullHistory() (string, error) {
 	// Bounded — see tmuxPollTimeout. The TUI calls this on a cadence, and it
 	// was the single largest CPU sink in the 2026-07-21 incident: three
 	// concurrent `capture-pane -S -2000` clients, each spinning >20 minutes.
-	output, err := s.runBoundedOutput("capture-pane", "-t", s.TmuxName(), "-p", "-e", "-S", "-2000")
+	output, err := s.runBoundedOutput("capture-pane", "-t", s.primaryWindowTarget(), "-p", "-e", "-S", "-2000")
 	if err != nil {
 		if captureGoneFromErr(err) {
 			return "", ErrCaptureGone

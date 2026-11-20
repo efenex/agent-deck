@@ -31,7 +31,7 @@ func (s *Session) ProbeReadiness(ctx context.Context) (ReadinessSnapshot, error)
 		cmd.WaitDelay = 10 * time.Millisecond
 		return commandOutput(cmd)
 	}
-	meta, err := run("display-message", "-p", "-t", "="+s.TmuxName()+":", "#{pane_id}\t#{pane_dead}\t#{pane_current_command}\t#{pane_title}")
+	meta, err := run("display-message", "-p", "-t", "="+s.primaryWindowTarget(), "#{pane_id}\t#{pane_dead}\t#{pane_current_command}\t#{pane_title}")
 	if err != nil {
 		if captureGoneFromErr(err) {
 			snap.Status, snap.Reason = "inactive", "pane_gone"

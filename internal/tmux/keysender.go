@@ -64,7 +64,8 @@ type localKeySender struct {
 
 // OpenKeySender starts a persistent tmux control-mode client on `socket`
 // (empty = the user's default tmux server) and returns a KeySender bound to
-// `target` (the tmux session insert mode is typing into).
+// `target`. A session-only target delivers to its managed agent window;
+// explicit window and pane targets are preserved.
 //
 // The client attaches EXPLICITLY to `target`:
 //
@@ -123,7 +124,13 @@ func OpenKeySender(socket, target string) (KeySender, error) {
 		_ = stdout.Close()
 		return nil, fmt.Errorf("keysender: start tmux -C -u attach-session: %w", err)
 	}
-	k := &localKeySender{target: target, cmd: cmd, pgid: ownProcessGroupID(cmd), stdin: stdin}
+	// Keep attachment at the requested session, but never let a bare session
+	// send follow its active window. Explicit window/pane targets stay intact.
+	sendTarget := target
+	if !strings.Contains(target, ":") && !strings.HasPrefix(target, "%") && !strings.HasPrefix(target, "@") {
+		sendTarget = primaryWindowTarget(target)
+	}
+	k := &localKeySender{target: sendTarget, cmd: cmd, pgid: ownProcessGroupID(cmd), stdin: stdin}
 
 	// Drain stdout so the OS pipe buffer never fills and blocks Send writes,
 	// and settle the attach handshake on the way past. tmux answers the

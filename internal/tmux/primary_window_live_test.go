@@ -12,8 +12,8 @@ import (
 // TestPrimaryWindow_LiveAuxWindowFocused is an integration test (real tmux, on
 // an isolated -L socket): when the operator has opened and focused an
 // auxiliary window next to the managed agent, the primary-window helpers must
-// still deliver keys to, and capture from, the first window, while the
-// existing session-name target keeps following the active (auxiliary) window.
+// still deliver keys to, and capture from, the first window. A raw tmux
+// session-name target independently checks that the auxiliary is untouched.
 func TestPrimaryWindow_LiveAuxWindowFocused(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not available")
@@ -60,11 +60,11 @@ func TestPrimaryWindow_LiveAuxWindowFocused(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	active, err := sess.CaptureFullHistory()
+	active, err := exec.Command("tmux", "-L", socket, "capture-pane", "-p", "-t", name).Output()
 	if err != nil {
-		t.Fatalf("CaptureFullHistory: %v", err)
+		t.Fatalf("capture active window: %v", err)
 	}
-	if strings.Contains(active, marker) {
+	if strings.Contains(string(active), marker) {
 		t.Fatalf("keys leaked into the focused auxiliary window: %q", active)
 	}
 }

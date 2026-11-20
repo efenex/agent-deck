@@ -75,7 +75,7 @@ func TestPrimePaneCapturesOneCallPerSocket(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := fmt.Sprintf("frame of %s\n\x1b[1m> \x1b[0m\n", s.Name); got != want {
+		if want := fmt.Sprintf("frame of %s:^\n\x1b[1m> \x1b[0m\n", s.Name); got != want {
 			t.Fatalf("%s frame = %q, want %q", s.Name, got, want)
 		}
 	}
@@ -99,7 +99,7 @@ func TestPrimePaneCapturesChunksLargeFleets(t *testing.T) {
 func TestPrimePaneCapturesResumesPastVanishedPane(t *testing.T) {
 	calls := 0
 	sessions := batchSessions(6, "batch-a")
-	withCaptureBatchRun(t, fakeCaptureBatch(t, map[string]bool{sessions[2].Name: true}, &calls))
+	withCaptureBatchRun(t, fakeCaptureBatch(t, map[string]bool{sessions[2].Name + ":^": true}, &calls))
 	if got := PrimePaneCaptures(sessions); got != 5 {
 		t.Fatalf("primed %d, want 5 (all but the vanished pane)", got)
 	}
