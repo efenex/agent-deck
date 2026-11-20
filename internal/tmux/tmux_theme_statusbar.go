@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/asheshgoplani/agent-deck/internal/agentpaths"
+	"github.com/asheshgoplani/agent-deck/internal/logging"
 	dark "github.com/thiagokokada/dark-mode-go"
 )
 
@@ -20,21 +22,43 @@ type tmuxThemeStyle struct {
 	hintColor         string
 }
 
+// Theme resolution runs repeatedly; report config failures only once per process.
+var themeConfigWarningOnce sync.Once
+
+func warnThemeConfigError(configPath, operation string) {
+	themeConfigWarningOnce.Do(func() {
+		// Parser errors can contain config values: log only the operation and path.
+		statusLog.Warn("theme_config_error",
+			slog.String("config_path", logging.SanitizeValue(configPath)),
+			slog.String("operation", operation),
+			slog.String("fallback", "dark"))
+	})
+}
+
 func resolvedAgentDeckTheme() string {
 	type cfg struct {
 		Theme string `toml:"theme"`
 	}
-	if configPath, err := agentpaths.EffectiveConfigPath("config.toml"); err == nil {
-		var c cfg
-		if _, err := toml.DecodeFile(configPath, &c); err == nil {
-			switch c.Theme {
-			case "light", "dark":
-				return c.Theme
-			case "system", "":
-				// fall through to OS detection
-			default:
-				return "dark"
-			}
+	configPath, err := agentpaths.EffectiveConfigPath("config.toml")
+	if err != nil {
+		warnThemeConfigError(configPath, "resolve")
+		return "dark"
+	}
+	var c cfg
+	if _, err := toml.DecodeFile(configPath, &c); err != nil {
+		if !os.IsNotExist(err) {
+			warnThemeConfigError(configPath, "read_or_decode")
+			return "dark"
+		}
+		// A missing file retains the historical auto-detection behaviour.
+	} else {
+		switch c.Theme {
+		case "light", "dark":
+			return c.Theme
+		case "system", "":
+			// fall through to OS detection
+		default:
+			return "dark"
 		}
 	}
 	// Check the terminal's own declaration before asking the OS.
