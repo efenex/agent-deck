@@ -26,10 +26,10 @@ var keySenderExec = tmuxExec
 // SetPreEnterDelay.
 const preEnterDelayDefault = 100 * time.Millisecond
 
-// SendKeys sends keys to the tmux session
+// SendKeys sends keys to the managed agent window.
 // Uses -l flag to treat keys as literal text, preventing tmux special key interpretation
 func (s *Session) SendKeys(keys string) error {
-	return s.sendKeysToTarget(s.Name, keys)
+	return s.sendKeysToTarget(s.primaryWindowTarget(), keys)
 }
 
 // windowTarget returns the tmux target addressing a specific window index
@@ -43,7 +43,11 @@ func (s *Session) windowTarget(windowIndex int) string {
 // selector is independent of base-index and remains stable when an operator
 // opens or focuses auxiliary windows alongside the managed agent.
 func (s *Session) primaryWindowTarget() string {
-	return s.TmuxName() + ":^"
+	return primaryWindowTarget(s.TmuxName())
+}
+
+func primaryWindowTarget(sessionName string) string {
+	return sessionName + ":^"
 }
 
 // SendKeysToPrimaryWindow sends literal text to the managed agent window.
@@ -51,9 +55,8 @@ func (s *Session) SendKeysToPrimaryWindow(keys string) error {
 	return s.sendKeysToTarget(s.primaryWindowTarget(), keys)
 }
 
-// sendKeysToTarget sends literal text to an explicit tmux target — either the
-// session name (active window) or a "<session>:<windowIndex>" window target.
-// SendKeys delegates here against the active window.
+// sendKeysToTarget sends literal text to an explicit pane or window target.
+// Default sends use the managed agent window, never the session's active window.
 func (s *Session) sendKeysToTarget(target, keys string) error {
 	s.invalidateCache()
 	// The -l flag makes tmux treat the string as literal text, not key names
@@ -79,7 +82,7 @@ func escapeTrailingSemicolon(keys string) string {
 // is idempotent — Escape lands in normal mode, `i` enters insert — so it is
 // safe to call when the prompt is already in insert mode. See issue #1264.
 func (s *Session) ensureInsertMode() {
-	s.ensureInsertModeOnTarget(s.Name)
+	s.ensureInsertModeOnTarget(s.primaryWindowTarget())
 }
 
 // ensureInsertModeOnTarget is ensureInsertMode against an explicit tmux target.
@@ -116,7 +119,7 @@ func beforeKeyBatch(before func() error) error {
 // insert mode before the paste — re-escaping before the trailing Enter would
 // drop the prompt back to normal mode and swallow the submit.
 func (s *Session) sendEnterRaw() error {
-	return s.sendEnterRawToTarget(s.Name)
+	return s.sendEnterRawToTarget(s.primaryWindowTarget())
 }
 
 // sendEnterRawToTarget is sendEnterRaw against an explicit tmux target.
@@ -140,7 +143,7 @@ func (s *Session) SendEnter() error {
 // SendEnterChecked checks the pane immediately before every key in the
 // optional vim insert sequence and before the final Enter.
 func (s *Session) SendEnterChecked(before func() error) error {
-	if err := s.ensureInsertModeOnTargetChecked(s.Name, before); err != nil {
+	if err := s.ensureInsertModeOnTargetChecked(s.primaryWindowTarget(), before); err != nil {
 		return err
 	}
 	if err := beforeKeyBatch(before); err != nil {
@@ -162,17 +165,17 @@ func (s *Session) SendEnterToPrimaryWindow() error {
 // when the user's tmux can't be reached or the session no longer exists;
 // callers should fall back to per-call SendKeys / SendEnter / SendNamedKey.
 func (s *Session) OpenKeySender() (KeySender, error) {
-	return OpenKeySender(s.SocketName, s.Name)
+	return OpenKeySender(s.SocketName, s.TmuxName())
 }
 
 // SendNamedKey sends a single tmux named key (e.g. "BSpace", "Up", "Down",
 // "Left", "Right", "Tab", "BTab", "C-c", "C-d") to the session. Unlike
 // SendKeys it does NOT use the -l flag, so tmux interprets the argument as a
 // key name rather than literal text. Used by insert mode (#1094) to forward
-// Backspace, arrow keys, Tab, and Ctrl-{C,D} from the TUI to the focused pane.
+// Backspace, arrow keys, Tab, and Ctrl-{C,D} from the TUI to the agent window.
 func (s *Session) SendNamedKey(key string) error {
 	s.invalidateCache()
-	cmd := keySenderExec(s.SocketName, "send-keys", "-t", s.Name, key)
+	cmd := keySenderExec(s.SocketName, "send-keys", "-t", s.primaryWindowTarget(), key)
 	return runSendKeysBounded(cmd)
 }
 
@@ -193,7 +196,7 @@ func (s *Session) SendNamedKeyToPrimaryWindow(key string) error {
 // bracketed paste, contrary to what this comment previously claimed — only
 // `paste-buffer -p` frames, and only when the pane app has enabled it.)
 func (s *Session) SendKeysAndEnter(keys string) error {
-	return s.sendKeysAndEnterCheckedToTarget(s.Name, keys, nil, nil, nil)
+	return s.sendKeysAndEnterCheckedToTarget(s.primaryWindowTarget(), keys, nil, nil, nil)
 }
 
 // SendKeysAndEnterToWindow is SendKeysAndEnter aimed at a specific tmux window
@@ -226,14 +229,14 @@ type PostPasteCheck func(pane string, captureErr error) (ok bool, err error)
 // check == nil (capture is then never called) reproduces SendKeysAndEnter's
 // unconditional behavior exactly, so every existing caller is unaffected.
 func (s *Session) SendKeysAndEnterChecked(keys string, capture func() (string, error), check PostPasteCheck) error {
-	return s.sendKeysAndEnterCheckedToTarget(s.Name, keys, capture, check, nil)
+	return s.sendKeysAndEnterCheckedToTarget(s.primaryWindowTarget(), keys, capture, check, nil)
 }
 
 // SendKeysAndEnterCheckedGuarded keeps the ordinary paste check and calls
 // before immediately before every tmux keystroke batch, including fallback
 // chunks and the final Enter.
 func (s *Session) SendKeysAndEnterCheckedGuarded(keys string, capture func() (string, error), check PostPasteCheck, before func() error) error {
-	return s.sendKeysAndEnterCheckedToTarget(s.Name, keys, capture, check, before)
+	return s.sendKeysAndEnterCheckedToTarget(s.primaryWindowTarget(), keys, capture, check, before)
 }
 
 // sendKeysAndEnterCheckedToTarget is the shared implementation behind
@@ -294,7 +297,7 @@ func (s *Session) sendKeysAndEnterCheckedToTarget(target, keys string, capture f
 	return s.sendEnterRawToTarget(target)
 }
 
-// SendKeysChunked delivers content to the tmux session's active window.
+// SendKeysChunked delivers content to the managed agent window.
 // Single-line payloads at or below canonicalSafeBytes go out as one
 // `send-keys -l`, exactly as before. Multi-line payloads of any size, and
 // larger single-line payloads, take the paste transport (load-buffer from
@@ -302,11 +305,11 @@ func (s *Session) sendKeysAndEnterCheckedToTarget(target, keys string, capture f
 // structure into a TUI composer; see sendKeysChunkedToTarget, pasteToTargetChecked
 // and canonical_line.go.
 func (s *Session) SendKeysChunked(content string) error {
-	return s.sendKeysChunkedToTarget(s.Name, content)
+	return s.sendKeysChunkedToTarget(s.primaryWindowTarget(), content)
 }
 
 func (s *Session) SendKeysChunkedChecked(content string, before func() error) error {
-	return s.sendKeysChunkedToTargetChecked(s.Name, content, before)
+	return s.sendKeysChunkedToTargetChecked(s.primaryWindowTarget(), content, before)
 }
 
 // sendKeysChunkedToTarget is SendKeysChunked against an explicit tmux target.
@@ -581,16 +584,12 @@ func splitIntoChunks(content string, maxSize int) []string {
 
 // SendCtrlC sends Ctrl+C (interrupt signal) to the tmux session
 func (s *Session) SendCtrlC() error {
-	s.invalidateCache()
-	cmd := s.tmuxCmd("send-keys", "-t", s.Name, "C-c")
-	return runSendKeysBounded(cmd)
+	return s.SendNamedKey("C-c")
 }
 
 // SendCtrlU sends Ctrl+U (clear line) to the tmux session
 func (s *Session) SendCtrlU() error {
-	s.invalidateCache()
-	cmd := s.tmuxCmd("send-keys", "-t", s.Name, "C-u")
-	return runSendKeysBounded(cmd)
+	return s.SendNamedKey("C-u")
 }
 
 // WaitForShellPrompt polls the terminal until a shell prompt is detected

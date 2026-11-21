@@ -2269,7 +2269,7 @@ func (s *Session) GetWorkDir() string {
 
 	// Bounded: a wedged server / destroyed target must not hang this poll (see
 	// tmuxPollTimeout). Bare .Output() here was one of the orphan-spin sources.
-	output, err := s.runBoundedOutput("display-message", "-t", s.TmuxName(), "-p", "#{pane_current_path}")
+	output, err := s.runBoundedOutput("display-message", "-t", s.primaryWindowTarget(), "-p", "#{pane_current_path}")
 	if err != nil {
 		return ""
 	}

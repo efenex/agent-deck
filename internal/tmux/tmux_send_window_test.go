@@ -1,13 +1,14 @@
 // Regression tests for issue #1369: quick-approve (`a`) must be able to deliver
 // "1"+Enter to a SPECIFIC tmux window — the one showing the Claude prompt —
 // not just the session's active window. SendKeysAndEnterToWindow targets
-// "<session>:<windowIndex>"; the existing SendKeysAndEnter keeps targeting the
-// session's active window (no window suffix). These tests record the exact
+// "<session>:<windowIndex>"; ordinary sends target the managed agent window,
+// independently of the active window. These tests record the exact
 // send-keys argv via the keySenderExec seam (see recordKeySender in
 // tmux_vim_mode_test.go), so they run without a real tmux server.
 package tmux
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -39,24 +40,36 @@ func TestSendKeysAndEnterToWindow_TargetsWindowIndex(t *testing.T) {
 	}
 }
 
-// TestSendKeysAndEnter_ActiveWindow_NoWindowSuffix locks the existing behavior:
-// the active-window send must target the bare session name with NO ":<idx>"
-// suffix, so the window-targeted variant is the only thing that addresses a
-// specific window.
-func TestSendKeysAndEnter_ActiveWindow_NoWindowSuffix(t *testing.T) {
-	calls := recordKeySender(t)
-
-	s := &Session{Name: "activewin"}
-	if err := s.SendKeysAndEnter("1"); err != nil {
-		t.Fatalf("SendKeysAndEnter returned error: %v", err)
-	}
-
-	for _, call := range *calls {
-		if strings.Contains(call, "activewin:") {
-			t.Fatalf("active-window send must not carry a window suffix: %q", call)
-		}
-		if !strings.Contains(call, "-t activewin") {
-			t.Fatalf("call must target the session: %q", call)
+func TestDefaultKeyDelivery_TargetsAgentWindow(t *testing.T) {
+	for _, vim := range []bool{false, true} {
+		s := &Session{Name: "multiwin", VimMode: vim}
+		for name, send := range map[string]func() error{
+			"literal":         func() error { return s.SendKeys("hello") },
+			"enter":           s.SendEnter,
+			"interrupt":       s.SendCtrlC,
+			"clear":           s.SendCtrlU,
+			"checked enter":   func() error { return s.SendEnterChecked(nil) },
+			"named":           func() error { return s.SendNamedKey("Tab") },
+			"submit":          func() error { return s.SendKeysAndEnter("hello") },
+			"checked submit":  func() error { return s.SendKeysAndEnterChecked("hello", nil, nil) },
+			"guarded submit":  func() error { return s.SendKeysAndEnterCheckedGuarded("hello", nil, nil, nil) },
+			"chunked":         func() error { return s.SendKeysChunked("hello") },
+			"checked chunked": func() error { return s.SendKeysChunkedChecked("hello", nil) },
+		} {
+			t.Run(fmt.Sprintf("%s/vim=%v", name, vim), func(t *testing.T) {
+				calls := recordKeySender(t)
+				if err := send(); err != nil {
+					t.Fatal(err)
+				}
+				if len(*calls) == 0 {
+					t.Fatal("no keystrokes recorded")
+				}
+				for _, call := range *calls {
+					if !strings.Contains(call, "-t multiwin:^ ") {
+						t.Fatalf("keystroke must target agent window: %q", call)
+					}
+				}
+			})
 		}
 	}
 }

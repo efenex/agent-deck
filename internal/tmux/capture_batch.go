@@ -144,7 +144,7 @@ func primeCaptureChunk(socket string, chunk []*Session) (primed int, timedOut bo
 			if i > 0 {
 				args = append(args, ";")
 			}
-			args = append(args, "capture-pane", "-t", s.TmuxName(), "-p", "-e", ";", "display-message", "-p", marker+strconv.Itoa(i))
+			args = append(args, "capture-pane", "-t", s.primaryWindowTarget(), "-p", "-e", ";", "display-message", "-p", marker+strconv.Itoa(i))
 		}
 		timeout := min(tmuxPollTimeout+time.Duration(len(chunk))*50*time.Millisecond, 10*time.Second)
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)

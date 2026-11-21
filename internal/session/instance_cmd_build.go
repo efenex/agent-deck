@@ -251,9 +251,9 @@ func (i *Instance) buildClaudeCommandWithMessage(baseCommand, message string) st
 			// The background subshell runs independently; exec replaces
 			// the current shell with claude for proper job control.
 			baseCmd = fmt.Sprintf(
-				`(sleep 2; SESSION_NAME=$(tmux display-message -p '#S'); `+
-					`while ! tmux capture-pane -p -t "$SESSION_NAME" | tail -5 | grep -qE "^>"; do sleep 0.2; done; `+
-					`tmux send-keys -l -t "$SESSION_NAME" -- '%s' \; send-keys -t "$SESSION_NAME" Enter) & `+
+				`(sleep 2; `+
+					`while ! tmux capture-pane -p -t "$TMUX_PANE" | tail -5 | grep -qE "^>"; do sleep 0.2; done; `+
+					`tmux send-keys -l -t "$TMUX_PANE" -- '%s' \; send-keys -t "$TMUX_PANE" Enter) & `+
 					`%sexec %s%s --session-id "%s"%s`,
 				escapedMsg,
 				bashExportPrefix, execEnvPrefix, claudeCmd, sessionUUID, extraFlags)

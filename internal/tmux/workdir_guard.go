@@ -240,7 +240,7 @@ func sameDirectory(a, b string) bool {
 // panePathProbe reads the pane's live working directory. Swappable seam so the
 // verification logic can be tested without a tmux server.
 var panePathProbe = func(s *Session) (string, error) {
-	out, err := s.runBoundedOutput("display-message", "-t", s.Name, "-p", "#{pane_current_path}")
+	out, err := s.runBoundedOutput("display-message", "-t", s.primaryWindowTarget(), "-p", "#{pane_current_path}")
 	if err != nil {
 		return "", err
 	}
