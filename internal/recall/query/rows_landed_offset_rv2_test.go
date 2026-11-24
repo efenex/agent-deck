@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,5 +157,45 @@ func TestRV2OffsetKeepsLegacyTailOverCap(t *testing.T) {
 	got := ScanLanded(context.Background(), "claude", path, "[REDACTED]", LandedWindow{To: -1, NotBefore: created, PeerEnvelope: true, TranscriptOffset: offset})
 	if !got.Complete || !got.Present {
 		t.Fatalf("offset narrowed the legacy tail over the cap: %+v", got)
+	}
+}
+
+// Starting at the legacy tail carries queue state from before the offset into
+// rows after it. An enqueue before the capture and its absorption after it must
+// give the same answer as an unbounded scan, fresh or older than NotBefore.
+func TestRV2OffsetTailQueueStateMatchesUnboundedScan(t *testing.T) {
+	created := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
+	queue := func(op string, at time.Time) string {
+		return fmt.Sprintf(`{"type":"queue-operation","operation":%q,"timestamp":%q,"content":"[REDACTED]"}`+"\n", op, at.Format(time.RFC3339Nano))
+	}
+	absorbed := func(at time.Time) string {
+		return queue("remove", at)[:len(queue("remove", at))-2] + `,"reason":"absorbed_mid_turn"}` + "\n" +
+			fmt.Sprintf(`{"type":"attachment","uuid":"q1","timestamp":%q,"attachment":{"type":"queued_command","prompt":"[REDACTED]","commandMode":"prompt","origin":{"kind":"human"}}}`+"\n", at.Format(time.RFC3339Nano))
+	}
+	for _, tc := range []struct {
+		name    string
+		enqueue time.Time
+		after   string
+	}{
+		{"fresh enqueue, absorbed", created.Add(time.Second), absorbed(created.Add(5 * time.Second))},
+		{"stale enqueue, absorbed", created.Add(-time.Hour), absorbed(created.Add(5 * time.Second))},
+		{"fresh enqueue, dequeued", created.Add(time.Second), queue("dequeue", created.Add(5*time.Second)) + offsetUser("u1", "[REDACTED]", created.Add(5*time.Second))},
+		{"stale enqueue, dequeued", created.Add(-time.Hour), queue("dequeue", created.Add(5*time.Second)) + offsetUser("u1", "[REDACTED]", created.Add(5*time.Second))},
+		{"fresh enqueue, removed", created.Add(time.Second), queue("remove", created.Add(5*time.Second))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "native.jsonl")
+			if err := os.WriteFile(path, []byte(offsetHistory()+queue("enqueue", tc.enqueue)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			offset := rv2Capture(t, path)
+			appendOffsetRows(t, path, tc.after)
+			full := ScanLanded(context.Background(), "claude", path, "[REDACTED]", LandedWindow{To: -1, NotBefore: created, PeerEnvelope: true, MaxBytes: 1 << 30})
+			got := ScanLanded(context.Background(), "claude", path, "[REDACTED]", LandedWindow{To: -1, NotBefore: created, PeerEnvelope: true, TranscriptOffset: offset})
+			t.Logf("full={Present:%v Pending:%v} offset={Present:%v Pending:%v Complete:%v %s}", full.Present, full.Pending, got.Present, got.Pending, got.Complete, got.Reason)
+			if !full.Complete || !got.Complete || got.Present != full.Present || got.Pending != full.Pending {
+				t.Fatalf("offset scan disagrees with unbounded scan: full=%+v offset=%+v", full, got)
+			}
+		})
 	}
 }
