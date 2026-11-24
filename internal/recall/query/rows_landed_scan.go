@@ -1,18 +1,22 @@
 package query
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"time"
+
+	"github.com/asheshgoplani/agent-deck/internal/recall/reader"
 )
 
 // LandedScanBytes bounds both late-proof scans and failed-reopen presence
 // checks. Incomplete coverage is never evidence that content is absent.
 const LandedScanBytes int64 = 4 << 20
 
-// LandedWindow restricts a scan to [From, To) and a timestamp interval.
+// LandedWindow restricts a scan to [From, To) and a timestamp interval. A
+// TranscriptOffset replaces the lower boundary with its bounded row backstep.
 // To < 0 means the current EOF. MaxBytes <= 0 uses LandedScanBytes.
 // PeerEnvelope also accepts a Claude peer envelope around the text. Set it
 // for a send delivered over Claude's socket, or when any copy of the text
@@ -22,6 +26,9 @@ type LandedWindow struct {
 	NotBefore, NotAfter time.Time
 	MaxBytes            int64
 	PeerEnvelope        bool
+	// TranscriptOffset proves byte coverage from the send even when the full
+	// file exceeds MaxBytes. It must match the current path and file identity.
+	TranscriptOffset *reader.TranscriptOffset
 }
 
 // LandedCandidate contains no transcript content.
@@ -55,10 +62,16 @@ func ScanLanded(ctx context.Context, harness, path, text string, w LandedWindow)
 	}
 	f, err := os.Open(path)
 	if err != nil {
+		if w.TranscriptOffset != nil {
+			return unknown("scan_limit")
+		}
 		return unknown("source_unreadable")
 	}
 	defer f.Close()
 	info, err := f.Stat()
+	if w.TranscriptOffset != nil && (err != nil || !w.TranscriptOffset.Matches(f, path, info)) {
+		return unknown("scan_limit")
+	}
 	if err != nil || !info.Mode().IsRegular() || w.From < 0 || info.Size() < w.From {
 		return unknown("source_shortened")
 	}
@@ -75,7 +88,19 @@ func ScanLanded(ctx context.Context, harness, path, text string, w LandedWindow)
 	}
 	start := w.From
 	result := LandedScan{Complete: true}
-	if to-start > limit {
+	if offset := w.TranscriptOffset; offset != nil {
+		// Never infer byte coverage from timestamps: native rows can be
+		// written out of timestamp order. Count the cap from the saved EOF;
+		// only the fixed backstep may read bytes before it.
+		if offset.Offset < w.From || offset.Offset > to || to-offset.Offset > limit {
+			return unknown("scan_limit")
+		}
+		var ok bool
+		start, ok = landedOffsetStart(f, offset.Offset)
+		if !ok {
+			return unknown("scan_limit")
+		}
+	} else if to-start > limit {
 		start = tailStart(f, to, limit)
 		result.Complete, result.Reason = false, "scan_limit"
 	}
@@ -145,4 +170,27 @@ func ScanLanded(ctx context.Context, harness, path, text string, w LandedWindow)
 	result.Pending = len(pending) > 0
 	result.Present = len(matches) > 0 || result.Pending
 	return result
+}
+
+// landedOffsetStart includes the row straddling EOF at send time, or the last
+// complete row if a concurrent append finished just before the stat. Never skip
+// a partial row: if its start is outside this bounded backstep, fail closed.
+func landedOffsetStart(f *os.File, offset int64) (int64, bool) {
+	const backstep int64 = 64 << 10
+	start := max(int64(0), offset-backstep)
+	b := make([]byte, offset-start)
+	if len(b) == 0 {
+		return 0, true
+	}
+	if _, err := f.ReadAt(b, start); err != nil {
+		return 0, false
+	}
+	// Ignore a terminal newline so the just-completed row is included too.
+	if b[len(b)-1] == '\n' {
+		b = b[:len(b)-1]
+	}
+	if i := bytes.LastIndexByte(b, '\n'); i >= 0 {
+		return start + int64(i) + 1, true
+	}
+	return 0, start == 0
 }

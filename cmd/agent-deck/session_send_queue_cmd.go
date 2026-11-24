@@ -18,6 +18,7 @@ import (
 	"github.com/asheshgoplani/agent-deck/internal/comms"
 	"github.com/asheshgoplani/agent-deck/internal/costs"
 	"github.com/asheshgoplani/agent-deck/internal/recall/query"
+	"github.com/asheshgoplani/agent-deck/internal/recall/reader"
 	"github.com/asheshgoplani/agent-deck/internal/send"
 	"github.com/asheshgoplani/agent-deck/internal/sendqueue"
 	"github.com/asheshgoplani/agent-deck/internal/session"
@@ -767,11 +768,19 @@ func typeQueued(profile, dir string, rec *sendqueue.Record, inst *session.Instan
 	}
 	result := sendqueue.ResultPath(dir, rec.SendID)
 	_ = os.Remove(result)
+	// Capture immediately before the durable typing transition, shared by
+	// ordinary, guarded and released sends. Size and identity must come from
+	// the same open file, not the caller's earlier stat paired with a new inode.
+	offset := reader.CaptureTranscriptOffset(path)
+	if offset != nil {
+		from = offset.Offset
+	}
 	if err := set(func(r *sendqueue.Record) {
 		r.State, r.Reason, r.ChildPID = sendqueue.StateTyping, "", 0
 		r.DeliveryEvidence = nil // evidence belongs to one attempt
 		r.Attempts++
 		r.TargetStatus, r.TranscriptPath, r.TranscriptFrom = status, path, from
+		r.TranscriptOffset = offset // replace stale evidence on every attempt
 		r.SentAt = time.Now().UTC().Format(time.RFC3339Nano)
 		if status == queueReleaseStatus {
 			// A released entry keeps the guard on any later attempt too.

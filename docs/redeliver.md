@@ -28,8 +28,8 @@ errors exit 1. A connection failure is not proof that nothing was sent.
 | unsupported tool/SSH placeholder | `unsupported`; no input |
 
 Failed reopening requires a running matching deck session, available cost
-budget, readable current native transcript with no matching content since
-creation, no other tracked send of the same text still queued or typed since
+budget, readable current native transcript with no matching content in the
+covered scan window, no other tracked send of the same text still queued or typed since
 creation, and an age of at most one hour by default. Configure
 `[send] redeliver_max_age = "1h"`; invalid/nonpositive values disable reopening.
 Claude and Codex are supported. A restarted native conversation of the same
@@ -42,6 +42,29 @@ of the same text when known, and ten minutes after `sent_at`. Already claimed ro
 matching rows report `blocked_unknown/content_present`. Incomplete or unreadable
 coverage also blocks. Check again with a new key for a later landing. Legacy
 landed records sharing a row remain suppressive with `shared_landed_row`.
+
+New durable sends capture `transcript_offset` before the delivery child starts:
+`path`, `offset` (file size in bytes), and `device`/`inode`. If an inode is
+unavailable, `prefix_bytes` and `prefix_hash` identify up to the first 4096 bytes
+with SHA-256; an empty file without an inode cannot provide an identity. The
+existing `transcript_path` and `transcript_from` fields remain for compatibility.
+Capture failure leaves the new field absent and keeps the legacy scan rules.
+
+Reopening and late proof can cover transcripts larger than 4 MiB when this
+snapshot still matches the path and file identity, the file has not shrunk below
+the offset, and the bytes from that offset to the scan's end fit the 4 MiB cap.
+The scan backs up to the start of the row at the offset (including a row just
+completed there), looking back at most 64 KiB, then reads every row through the
+end. Failure to find that start, a changed identity/path, truncation, or a window
+over the cap returns `scan_limit`. Records without the new field retain the
+legacy behavior, including `scan_limit` for oversized presence scans.
+Coverage never depends on timestamp ordering. Timestamp filters, the next
+same-text send's upper byte boundary, ambiguity and existing row claims still
+apply; an offset does not authorize a unique claim when two matching rows exist.
+Offset presence coverage starts at send time plus the backstep; legacy presence
+scans start at the beginning of the file. Both filter matching rows by creation
+time. The identity/size check assumes append-only transcripts: it cannot detect
+an in-place rewrite that preserves the inode and regrows past the saved offset.
 
 The guarantee is per send ID. The presence check reduces duplicates caused by
 another send or manual copy; it cannot exclude input racing that check.

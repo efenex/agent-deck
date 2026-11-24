@@ -23,6 +23,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/asheshgoplani/agent-deck/internal/recall/reader"
 )
 
 // States of a queued send, in order. failed is terminal for the worker;
@@ -95,8 +97,11 @@ type Record struct {
 	ChildPID       int    `json:"child_pid,omitempty"`
 	TranscriptPath string `json:"transcript_path,omitempty"`
 	TranscriptFrom int64  `json:"transcript_from,omitempty"`
-	LandedRowID    string `json:"landed_row_id,omitempty"`
-	LandedAt       string `json:"landed_at,omitempty"`
+	// TranscriptOffset adds send-time file identity to the legacy path/from.
+	// Absent on old records or when the transcript could not be captured.
+	TranscriptOffset *reader.TranscriptOffset `json:"transcript_offset,omitempty"`
+	LandedRowID      string                   `json:"landed_row_id,omitempty"`
+	LandedAt         string                   `json:"landed_at,omitempty"`
 	// ClaudeSessionID is the Claude conversation the send went to: the
 	// target's at queue time, then the delivering child's, then the
 	// transcript the row landed in (#2397). Empty for other tools.
