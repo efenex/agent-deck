@@ -152,7 +152,12 @@ func TestScanLandedSendOffsetBackstep(t *testing.T) {
 			if err := os.WriteFile(path, []byte(offsetHistory()+row[:cut]), 0600); err != nil {
 				t.Fatal(err)
 			}
-			w := offsetWindow(t, path, LandedWindow{To: -1, NotBefore: now})
+			// Proof shape: the window starts at the send-time offset.
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := offsetWindow(t, path, LandedWindow{From: info.Size(), To: -1, NotBefore: now})
 			appendOffsetRows(t, path, row[cut:])
 			got := ScanLanded(context.Background(), "claude", path, "[REDACTED]", w)
 			if cut == len(row) {

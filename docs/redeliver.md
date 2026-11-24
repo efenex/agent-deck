@@ -57,18 +57,21 @@ and the legacy rules apply. When the legacy window fits the 4 MiB cap, the scan
 keeps it. Otherwise reopening and late proof can cover transcripts larger than
 4 MiB when the snapshot still matches the file identity, the bytes before the
 offset are unchanged, and the bytes from the offset to the scan's end fit the
-cap. A row completed before the capture was written before anything was typed
-and is not scanned; a row straddling the offset is, from its start, looking
-back at most 64 KiB. Failure to find that start, a changed identity or anchor
+cap. A presence check on such a file still scans the last 4 MiB, as legacy
+does, so the offset adds completeness without dropping rows legacy saw. A late
+proof starts at the offset: a row completed before the capture was written
+before anything was typed and is not scanned; a row straddling the offset
+is, from its start, looking back at most 64 KiB. Failure to find that start, a changed identity or anchor
 (replacement, truncation, regrowth, a reused inode), or a window over the cap
 returns `scan_limit`. Records without the new field retain the legacy behavior,
 including `scan_limit` for oversized presence scans.
 Coverage never depends on timestamp ordering. Timestamp filters, the next
 same-text send's upper byte boundary, ambiguity and existing row claims still
 apply; an offset does not authorize a unique claim when two matching rows exist.
-On an oversized file, offset presence coverage starts at the latest attempt's
-send time, so a row of an earlier attempt landing between a reopen check and
-the next attempt's capture is not seen (the race this check cannot exclude).
+On an oversized file, offset presence coverage starts at the earlier of the
+latest attempt's send time and the last 4 MiB, so a row of an earlier attempt
+written before both (for example landing between a reopen check and the next
+attempt's capture) is not seen (the race this check cannot exclude).
 
 The guarantee is per send ID. The presence check reduces duplicates caused by
 another send or manual copy; it cannot exclude input racing that check.

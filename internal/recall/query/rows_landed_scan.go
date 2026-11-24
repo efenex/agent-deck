@@ -102,16 +102,18 @@ func ScanLanded(ctx context.Context, harness, path, text string, w LandedWindow)
 			return unknown("scan_limit")
 		}
 		offsetStart, ok := landedOffsetStart(f, offset.Offset)
-		if to-w.From <= limit {
-			// The legacy window fits: keep all of its coverage (rows of an
-			// earlier attempt sit before this attempt's offset); the offset
-			// only adds the row straddling it.
-			if ok && offsetStart < start {
-				start = offsetStart
+		if to-w.From > limit {
+			if !ok || to-offset.Offset > limit {
+				return unknown("scan_limit")
 			}
-		} else if !ok || to-offset.Offset > limit {
-			return unknown("scan_limit")
-		} else {
+			// Keep the legacy tail as well: a row of an earlier attempt can
+			// sit before this attempt's offset, and the legacy tail scan saw
+			// it. Proof scans start at the offset (From), so they gain nothing.
+			start = max(w.From, tailStart(f, to, limit))
+		}
+		// The offset never narrows the legacy window; it only adds the row
+		// straddling it and, over the cap, completes the coverage.
+		if ok && offsetStart < start {
 			start = offsetStart
 		}
 	} else if to-start > limit {
