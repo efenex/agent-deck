@@ -75,7 +75,8 @@ func TestTranscriptOffsetPrefixFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := sha256.Sum256([]byte(prefix))
-	s := TranscriptOffset{Path: path, Offset: int64(len(prefix)), PrefixBytes: int64(len(prefix)), PrefixHash: hex.EncodeToString(h[:])}
+	s := TranscriptOffset{Path: path, Offset: int64(len(prefix)), PrefixBytes: int64(len(prefix)), PrefixHash: hex.EncodeToString(h[:]),
+		AnchorBytes: int64(len(prefix)), AnchorHash: hex.EncodeToString(h[:])}
 	if !s.Matches(f, path, info) {
 		t.Fatal("prefix hash must match after growth")
 	}
@@ -88,6 +89,9 @@ func TestTranscriptOffsetPrefixFallback(t *testing.T) {
 		func(s *TranscriptOffset) { s.Offset-- },
 		func(s *TranscriptOffset) { s.Offset = -1 },
 		func(s *TranscriptOffset) { s.Path += ".other" },
+		func(s *TranscriptOffset) { s.AnchorHash = "" },
+		func(s *TranscriptOffset) { s.AnchorHash = strings.Repeat("0", 64) },
+		func(s *TranscriptOffset) { s.AnchorBytes-- },
 	} {
 		bad := s
 		mutate(&bad)

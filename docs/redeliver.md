@@ -44,27 +44,31 @@ coverage also blocks. Check again with a new key for a later landing. Legacy
 landed records sharing a row remain suppressive with `shared_landed_row`.
 
 New durable sends capture `transcript_offset` before the delivery child starts:
-`path`, `offset` (file size in bytes), and `device`/`inode`. If an inode is
-unavailable, `prefix_bytes` and `prefix_hash` identify up to the first 4096 bytes
-with SHA-256; an empty file without an inode cannot provide an identity. The
-existing `transcript_path` and `transcript_from` fields remain for compatibility.
+`path`, `offset` (file size in bytes), `device`/`inode`, and `anchor_bytes`/
+`anchor_hash` (SHA-256 of up to 4096 bytes just before the offset). If an inode
+is unavailable, `prefix_bytes` and `prefix_hash` identify up to the first 4096
+bytes; an empty file without an inode cannot provide an identity. The existing
+`transcript_path` and `transcript_from` fields remain for compatibility.
 Capture failure leaves the new field absent and keeps the legacy scan rules.
 
-Reopening and late proof can cover transcripts larger than 4 MiB when this
-snapshot still matches the path and file identity, the file has not shrunk below
-the offset, and the bytes from that offset to the scan's end fit the 4 MiB cap.
-The scan backs up to the start of the row at the offset (including a row just
-completed there), looking back at most 64 KiB, then reads every row through the
-end. Failure to find that start, a changed identity/path, truncation, or a window
-over the cap returns `scan_limit`. Records without the new field retain the
-legacy behavior, including `scan_limit` for oversized presence scans.
+The snapshot only extends coverage; it never narrows it. When the scanned file
+is a different path (a restarted native conversation), the snapshot is ignored
+and the legacy rules apply. When the legacy window fits the 4 MiB cap, the scan
+keeps it. Otherwise reopening and late proof can cover transcripts larger than
+4 MiB when the snapshot still matches the file identity, the bytes before the
+offset are unchanged, and the bytes from the offset to the scan's end fit the
+cap. A row completed before the capture was written before anything was typed
+and is not scanned; a row straddling the offset is, from its start, looking
+back at most 64 KiB. Failure to find that start, a changed identity or anchor
+(replacement, truncation, regrowth, a reused inode), or a window over the cap
+returns `scan_limit`. Records without the new field retain the legacy behavior,
+including `scan_limit` for oversized presence scans.
 Coverage never depends on timestamp ordering. Timestamp filters, the next
 same-text send's upper byte boundary, ambiguity and existing row claims still
 apply; an offset does not authorize a unique claim when two matching rows exist.
-Offset presence coverage starts at send time plus the backstep; legacy presence
-scans start at the beginning of the file. Both filter matching rows by creation
-time. The identity/size check assumes append-only transcripts: it cannot detect
-an in-place rewrite that preserves the inode and regrows past the saved offset.
+On an oversized file, offset presence coverage starts at the latest attempt's
+send time, so a row of an earlier attempt landing between a reopen check and
+the next attempt's capture is not seen (the race this check cannot exclude).
 
 The guarantee is per send ID. The presence check reduces duplicates caused by
 another send or manual copy; it cannot exclude input racing that check.

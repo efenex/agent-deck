@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"strings"
@@ -20,10 +22,17 @@ func saveSendOffset(t *testing.T, dir string, r *sendqueue.Record) {
 		t.Fatal(err)
 	}
 	dev, ino := reader.FileIdentity(info)
+	snapshot := map[string]any{"path": r.TranscriptPath, "offset": info.Size(), "device": dev, "inode": ino}
+	if n := min(info.Size(), 4096); n > 0 {
+		data, err := os.ReadFile(r.TranscriptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := sha256.Sum256(data[info.Size()-n:])
+		snapshot["anchor_bytes"], snapshot["anchor_hash"] = n, hex.EncodeToString(h[:])
+	}
 	// JSON keeps the capability regressions runnable against the base record.
-	b, err := json.Marshal(map[string]any{"transcript_offset": map[string]any{
-		"path": r.TranscriptPath, "offset": info.Size(), "device": dev, "inode": ino,
-	}})
+	b, err := json.Marshal(map[string]any{"transcript_offset": snapshot})
 	if err != nil {
 		t.Fatal(err)
 	}

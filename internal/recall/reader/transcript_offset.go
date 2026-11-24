@@ -16,6 +16,12 @@ type TranscriptOffset struct {
 	Inode       uint64 `json:"inode,omitempty"`
 	PrefixBytes int64  `json:"prefix_bytes,omitempty"`
 	PrefixHash  string `json:"prefix_hash,omitempty"`
+	// AnchorBytes/AnchorHash hash the bytes just before Offset (at most
+	// 4096). Device/inode and size alone accept a file truncated and regrown
+	// past the offset, or a new file that reused the inode; the bytes before
+	// the offset of an append-only transcript never change.
+	AnchorBytes int64  `json:"anchor_bytes,omitempty"`
+	AnchorHash  string `json:"anchor_hash,omitempty"`
 }
 
 const transcriptIdentityBytes int64 = 4096
@@ -34,6 +40,13 @@ func CaptureTranscriptOffset(path string) *TranscriptOffset {
 	}
 	dev, ino := FileIdentity(info)
 	snapshot := &TranscriptOffset{Path: path, Offset: info.Size(), Device: dev, Inode: ino}
+	if snapshot.Offset > 0 {
+		snapshot.AnchorBytes = min(snapshot.Offset, transcriptIdentityBytes)
+		snapshot.AnchorHash = transcriptHash(f, snapshot.Offset-snapshot.AnchorBytes, snapshot.AnchorBytes)
+		if snapshot.AnchorHash == "" {
+			return nil
+		}
+	}
 	if ino == 0 {
 		snapshot.PrefixBytes = min(info.Size(), transcriptIdentityBytes)
 		// An empty prefix cannot establish any file identity.
@@ -57,6 +70,12 @@ func (s *TranscriptOffset) Matches(f *os.File, path string, info os.FileInfo) bo
 	if s == nil || s.Path == "" || s.Path != path || s.Offset < 0 || !info.Mode().IsRegular() || info.Size() < s.Offset {
 		return false
 	}
+	// Offset zero puts the whole file in the window; anything else must
+	// still have the same bytes just before the offset.
+	if s.Offset > 0 && (s.AnchorBytes != min(s.Offset, transcriptIdentityBytes) || s.AnchorHash == "" ||
+		s.AnchorHash != transcriptHash(f, s.Offset-s.AnchorBytes, s.AnchorBytes)) {
+		return false
+	}
 	if s.Inode != 0 {
 		dev, ino := FileIdentity(info)
 		return s.Device == dev && s.Inode == ino
@@ -66,8 +85,12 @@ func (s *TranscriptOffset) Matches(f *os.File, path string, info os.FileInfo) bo
 }
 
 func transcriptPrefixHash(f *os.File, size int64) string {
+	return transcriptHash(f, 0, size)
+}
+
+func transcriptHash(f *os.File, from, size int64) string {
 	b := make([]byte, size)
-	if _, err := f.ReadAt(b, 0); err != nil {
+	if _, err := f.ReadAt(b, from); err != nil {
 		return ""
 	}
 	h := sha256.Sum256(b)

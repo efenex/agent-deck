@@ -2,6 +2,8 @@ package query
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -22,9 +24,9 @@ func offsetWindow(t *testing.T, path string, w LandedWindow) LandedWindow {
 		t.Fatal(err)
 	}
 	dev, ino := reader.FileIdentity(info)
-	b, err := json.Marshal(map[string]any{"TranscriptOffset": map[string]any{
-		"path": path, "offset": info.Size(), "device": dev, "inode": ino,
-	}})
+	snapshot := map[string]any{"path": path, "offset": info.Size(), "device": dev, "inode": ino}
+	addOffsetAnchor(t, path, info.Size(), snapshot)
+	b, err := json.Marshal(map[string]any{"TranscriptOffset": snapshot})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,6 +34,22 @@ func offsetWindow(t *testing.T, path string, w LandedWindow) LandedWindow {
 		t.Fatal(err)
 	}
 	return w
+}
+
+// addOffsetAnchor adds the hash of the bytes just before offset, as
+// reader.CaptureTranscriptOffset records it, in its JSON shape.
+func addOffsetAnchor(t *testing.T, path string, offset int64, snapshot map[string]any) {
+	t.Helper()
+	n := min(offset, 4096)
+	if n == 0 {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.Sum256(data[offset-n : offset])
+	snapshot["anchor_bytes"], snapshot["anchor_hash"] = n, hex.EncodeToString(h[:])
 }
 
 func appendOffsetRows(t *testing.T, path, data string) {
@@ -137,6 +155,14 @@ func TestScanLandedSendOffsetBackstep(t *testing.T) {
 			w := offsetWindow(t, path, LandedWindow{To: -1, NotBefore: now})
 			appendOffsetRows(t, path, row[cut:])
 			got := ScanLanded(context.Background(), "claude", path, "[REDACTED]", w)
+			if cut == len(row) {
+				// Completed before the capture, so before anything was typed:
+				// never this send's row.
+				if !got.Complete || len(got.Candidates) != 0 {
+					t.Fatalf("pre-send row inside offset window: %+v", got)
+				}
+				return
+			}
 			if !got.Complete || len(got.Candidates) != 1 || got.Candidates[0].ID != "concurrent" {
 				t.Fatalf("concurrent row lost at offset: %+v", got)
 			}
