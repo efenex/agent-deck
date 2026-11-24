@@ -309,7 +309,7 @@ func reopenFailedSend(profile, dir string, rec *sendqueue.Record, inst *session.
 	defer cancel()
 	path := session.LiveTranscriptPath(inst, instances)
 	presence := query.ScanLanded(ctx, rowsHarness(inst.Tool), path, rec.Message,
-		query.LandedWindow{To: -1, NotBefore: created, PeerEnvelope: true})
+		query.LandedWindow{To: -1, NotBefore: created, PeerEnvelope: true, TranscriptOffset: rec.TranscriptOffset})
 	if presence.Present {
 		return answer("blocked_unknown", "content_present")
 	}
@@ -420,7 +420,7 @@ func boundedSendProof(dir string, rec *sendqueue.Record) (query.LandedCandidate,
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	scan := query.ScanLanded(ctx, rowsHarness(rec.Tool), rec.TranscriptPath, rec.Message,
-		query.LandedWindow{From: rec.TranscriptFrom, To: to, NotBefore: sent, NotAfter: sent.Add(redeliverProofWindow), PeerEnvelope: sentOverSocket(rec)})
+		query.LandedWindow{From: rec.TranscriptFrom, To: to, NotBefore: sent, NotAfter: sent.Add(redeliverProofWindow), PeerEnvelope: sentOverSocket(rec), TranscriptOffset: rec.TranscriptOffset})
 	if !scan.Complete {
 		return none, scan.Reason
 	}
